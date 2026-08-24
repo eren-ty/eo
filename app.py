@@ -583,6 +583,13 @@ HTML = r"""<!doctype html>
           <textarea id="domains" placeholder="example.com&#10;example2.com"></textarea>
           <div class="hint">每行一个，也支持空格、逗号、分号分隔。每个站点会创建 <b>@</b> 和 <b>*</b> 两个加速域名。</div>
         </div>
+        <div class="full">
+          <label for="origin_cname_preset">源站 / 共享 CNAME 预设</label>
+          <select id="origin_cname_preset">
+            <option value="">自定义</option>
+          </select>
+          <div class="hint">选择后会自动填充下面的源站和共享 CNAME，仍然可以手动修改。</div>
+        </div>
         <div>
           <label for="origin">源站</label>
           <input id="origin" placeholder="source-178.gtmvip.com">
@@ -627,7 +634,11 @@ HTML = r"""<!doctype html>
           <div><label for="config_json">配置模板 JSON</label><input id="config_json" value="__DEFAULT_CONFIG__"></div>
           <div><label for="plan_id">套餐 ID</label><input id="plan_id" value="__DEFAULT_PLAN__"></div>
           <div><label for="env_file">新账号 env</label><input id="env_file" value="tencent-eo-new.env"></div>
-          <div><label for="dns_env_file">DNS env</label><input id="dns_env_file" value="dns-providers.env"></div>
+          <div>
+            <label for="dns_env_preset">DNS env</label>
+            <select id="dns_env_preset"></select>
+            <input id="dns_env_file" value="dns-providers.env" style="margin-top:8px">
+          </div>
           <div><label for="http_origin_port">HTTP 回源端口</label><input id="http_origin_port" type="number" value="80"></div>
           <div><label for="https_origin_port">HTTPS 回源端口</label><input id="https_origin_port" type="number" value="443"></div>
         </div>
@@ -657,6 +668,98 @@ HTML = r"""<!doctype html>
     const $ = (id) => document.getElementById(id);
     let currentJob = null;
     let pollTimer = null;
+    const originCnamePresets = [
+      {
+        label: "178 Web",
+        origin: "source-178.gtmvip.com",
+        cname: "178-web.3rr2n4ammrbn.share.dnse4.com"
+      },
+      {
+        label: "178 API",
+        origin: "source-178-api.gtmvip.com",
+        cname: "178-api.3rr2n4ammrbn.share.dnse4.com"
+      },
+      {
+        label: "GQJ Web",
+        origin: "source-gqj.gtmvip.com",
+        cname: "gqj-web.3rr2n4ammrbn.share.dnse4.com"
+      },
+      {
+        label: "GQJ API",
+        origin: "source-gqj-api.gtmvip.com",
+        cname: "gqj-api.3rr2n4ammrbn.share.dnse4.com"
+      },
+      {
+        label: "GQJIM API",
+        origin: "source-gqjim.gtmvip.com",
+        cname: "gqjim-api.3rr2n4ammrbn.share.dnse4.com"
+      },
+      {
+        label: "360 Web",
+        origin: "source-360.gtmvip.com",
+        cname: "360-web.3rr2n4ammrbn.share.dnse4.com"
+      },
+      {
+        label: "360 API",
+        origin: "source-360ba-api.gtmvip.com",
+        cname: "360-api.3rr2n4ammrbn.share.dnse4.com"
+      },
+      {
+        label: "聊吧 Web",
+        origin: "source-liaoba.gtmvip.com",
+        cname: "liaoba-web.3rr2n4ammrbn.share.dnse4.com"
+      },
+      {
+        label: "Transit",
+        origin: "source-transit.gtmvip.com",
+        cname: "transit.3rr2n4ammrbn.share.dnse4.com"
+      },
+      {
+        label: "Tencent 通用",
+        origin: "",
+        cname: "tencent.3rr2n4ammrbn.share.dnse4.com"
+      }
+    ];
+    const dnsEnvPresets = [
+      "dns-providers.env",
+      "dns-providers-new.env",
+      "dns-providers-prod.env",
+      "dns-providers-ali.env"
+    ];
+
+    function initPresets() {
+      const preset = $("origin_cname_preset");
+      for (const item of originCnamePresets) {
+        const opt = document.createElement("option");
+        opt.value = item.label;
+        opt.textContent = item.label + " · " + (item.origin || "自填源站") + " · " + item.cname;
+        preset.appendChild(opt);
+      }
+      preset.addEventListener("change", () => {
+        const item = originCnamePresets.find(x => x.label === preset.value);
+        if (!item) return;
+        if (item.origin) $("origin").value = item.origin;
+        $("shared_cname").value = item.cname;
+      });
+      preset.value = "178 Web";
+      preset.dispatchEvent(new Event("change"));
+
+      const dnsPreset = $("dns_env_preset");
+      for (const value of dnsEnvPresets) {
+        const opt = document.createElement("option");
+        opt.value = value;
+        opt.textContent = value;
+        dnsPreset.appendChild(opt);
+      }
+      const custom = document.createElement("option");
+      custom.value = "";
+      custom.textContent = "自定义";
+      dnsPreset.appendChild(custom);
+      dnsPreset.value = "dns-providers.env";
+      dnsPreset.addEventListener("change", () => {
+        if (dnsPreset.value) $("dns_env_file").value = dnsPreset.value;
+      });
+    }
 
     $("host_header_mode").addEventListener("change", () => {
       $("custom_host_wrap").style.display = $("host_header_mode").value === "custom" ? "block" : "none";
@@ -765,6 +868,7 @@ HTML = r"""<!doctype html>
     $("start").addEventListener("click", startJob);
     $("clear").addEventListener("click", () => { $("logs").textContent = ""; $("results").innerHTML = ""; });
     $("refresh_templates").addEventListener("click", () => loadTemplates(true));
+    initPresets();
     loadTemplates(false);
   </script>
 </body>
