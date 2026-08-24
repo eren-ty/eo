@@ -368,6 +368,24 @@ def build_dns_cname_command(domain: str, payload: dict[str, Any], output_root: P
     ]
 
 
+def log_dns_cname_issues(job: Job, domain: str, output_root: Path) -> None:
+    path = output_root / f"dns-cname-{safe_name(domain)}.csv"
+    if not path.exists():
+        return
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            for row in csv.DictReader(f):
+                if row.get("status") == "failed":
+                    job.log(
+                        "DNS CNAME issue: "
+                        f"{row.get('zone_name', '')} {row.get('record_name', '')} "
+                        f"provider={row.get('provider', '')} rr={row.get('rr', '')} "
+                        f"error={row.get('error', '')}"
+                    )
+    except Exception as exc:
+        job.log(f"Read DNS CNAME issues failed for {domain}: {exc}")
+
+
 def run_dns_cname(job: Job, domain: str, payload: dict[str, Any], output_root: Path) -> bool:
     cmd = build_dns_cname_command(domain, payload, output_root)
     job.log("DNS CNAME Command: " + " ".join(cmd))
@@ -384,6 +402,7 @@ def run_dns_cname(job: Job, domain: str, payload: dict[str, Any], output_root: P
         job.log(line.rstrip())
     exit_code = proc.wait()
     if exit_code != 0:
+        log_dns_cname_issues(job, domain, output_root)
         job.log(f"DNS CNAME failed for {domain}: exit {exit_code}")
         return False
     job.log(f"DNS CNAME configured for {domain}: @ and * -> {payload['shared_cname']}")

@@ -1073,6 +1073,14 @@ def cmd_add_cname(args: argparse.Namespace) -> int:
         )
         writer.writeheader()
         writer.writerows(results)
+    for result in results:
+        if result.get("status") == "failed":
+            print(
+                "FAILED CNAME "
+                f"{result.get('zone_name', '')} {result.get('record_name', '')}: "
+                f"{result.get('error', '')}",
+                file=sys.stderr,
+            )
     print(f"Wrote result CSV: {args.out}")
     if not args.apply:
         print("Dry-run only. Add --apply --yes to create CNAME records.")
