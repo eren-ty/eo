@@ -2410,6 +2410,16 @@ def write_ownership_csv(path: str, row_data: dict[str, str]) -> None:
         writer.writerow(row_data)
 
 
+def ownership_csv_has_dns_txt(path: str) -> bool:
+    if not os.path.exists(path):
+        return False
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            if (row.get("subdomain") or "").strip() and (row.get("record_value") or "").strip():
+                return True
+    return False
+
+
 def read_batch_rows(path: str) -> list[dict[str, str]]:
     with open(path, "r", encoding="utf-8-sig", newline="") as f:
         return list(csv.DictReader(f))
@@ -2779,6 +2789,8 @@ def cmd_onboard_zone(args: argparse.Namespace) -> int:
 
     if args.skip_dns:
         print("Step 2/6 Add ownership TXT skipped", file=sys.stderr)
+    elif not ownership_csv_has_dns_txt(ownership_csv):
+        print("Step 2/6 Add ownership TXT skipped; no ownership TXT returned by CreateZone", file=sys.stderr)
     else:
         print("Step 2/6 Add ownership TXT", file=sys.stderr)
         dns_cmd = [
