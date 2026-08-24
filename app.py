@@ -330,6 +330,55 @@ def build_onboard_command(domain: str, payload: dict[str, Any], zone_output_dir:
     return cmd
 
 
+def build_dns_cname_command(domain: str, payload: dict[str, Any], output_root: Path) -> list[str]:
+    return [
+        sys.executable,
+        str(STATE.tx_eo_dir / "dns_txt_verify_tool.py"),
+        "--env-file",
+        payload["dns_env_file"],
+        "--retries",
+        str(payload.get("retries", 20)),
+        "add-cname",
+        "--zone-names",
+        domain,
+        "--records",
+        "@,*",
+        "--target",
+        payload["shared_cname"],
+        "--ttl",
+        str(payload["dns_cname_ttl"]),
+        "--out",
+        str(output_root / f"dns-cname-{safe_name(domain)}.csv"),
+        "--no-legacy-dnspod",
+        "--domain-cache-json",
+        str(output_root / "dns-domain-cache.json"),
+        "--apply",
+        "--yes",
+    ]
+
+
+def run_dns_cname(job: Job, domain: str, payload: dict[str, Any], output_root: Path) -> bool:
+    cmd = build_dns_cname_command(domain, payload, output_root)
+    job.log("DNS CNAME Command: " + " ".join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(STATE.tx_eo_dir),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        job.log(line.rstrip())
+    exit_code = proc.wait()
+    if exit_code != 0:
+        job.log(f"DNS CNAME failed for {domain}: exit {exit_code}")
+        return False
+    job.log(f"DNS CNAME configured for {domain}: @ and * -> {payload['shared_cname']}")
+    return True
+
+
 def run_job(job: Job) -> None:
     payload = job.payload
     job.started_at = now_iso()
@@ -370,6 +419,13 @@ def run_job(job: Job) -> None:
         elif exit_code == 0 and payload.get("web_template_ref"):
             job.log(f"Web protection skipped for {domain}: zone id not found in ownership CSV")
 
+        dns_cname_status = "skipped"
+        if exit_code == 0 and payload.get("configure_dns_cname", False):
+            dns_cname_status = "success" if run_dns_cname(job, domain, payload, output_root) else "failed"
+            if dns_cname_status == "failed":
+                status = "failed"
+                exit_code = 2
+
         if exit_code != 0:
             failures += 1
         job.add_result(
@@ -378,6 +434,7 @@ def run_job(job: Job) -> None:
                 "status": status,
                 "exit_code": exit_code,
                 "zone_id": zone_id,
+                "dns_cname_status": dns_cname_status,
                 "output_dir": str(zone_output_dir),
                 "started_at": started,
                 "finished_at": finished,
@@ -445,6 +502,8 @@ def parse_create_payload(raw: dict[str, Any]) -> dict[str, Any]:
         "host_header": host_header,
         "auto_cert": bool(raw.get("auto_cert", True)),
         "enable_origin_acl": bool(raw.get("enable_origin_acl", True)),
+        "configure_dns_cname": bool(raw.get("configure_dns_cname", False)),
+        "dns_cname_ttl": int_value("dns_cname_ttl", 600),
         "web_template_ref": str(raw.get("web_template_ref") or ""),
         "verify_wait_seconds": int_value("verify_wait_seconds", 5),
         "import_config_retries": int_value("import_config_retries", 60),
@@ -647,6 +706,7 @@ HTML = r"""<!doctype html>
         <div class="full row">
           <label class="check"><input id="auto_cert" type="checkbox" checked> 自动匹配 HTTPS 证书</label>
           <label class="check"><input id="enable_origin_acl" type="checkbox" checked> 开启源站防护</label>
+          <label class="check"><input id="configure_dns_cname" type="checkbox"> 自动写 DNS CNAME（@ 和 *）</label>
           <button class="secondary" id="refresh_templates" type="button">刷新防护模板</button>
         </div>
       </div>
@@ -663,13 +723,14 @@ HTML = r"""<!doctype html>
           </div>
           <div><label for="http_origin_port">HTTP 回源端口</label><input id="http_origin_port" type="number" value="80"></div>
           <div><label for="https_origin_port">HTTPS 回源端口</label><input id="https_origin_port" type="number" value="443"></div>
+          <div><label for="dns_cname_ttl">DNS CNAME TTL</label><input id="dns_cname_ttl" type="number" value="600"></div>
         </div>
       </details>
       <div class="row" style="margin-top:16px">
         <button id="start">开始创建</button>
         <button class="secondary" id="clear" type="button">清空日志</button>
       </div>
-      <div class="hint" style="margin-top:10px">配置模板应包含：节点缓存不缓存、浏览器缓存 TTL 0、HTTPS、WebSocket、中国大陆网络优化。默认使用你现有的 178zq2 配置模板。</div>
+      <div class="hint" style="margin-top:10px">配置模板应包含：节点缓存不缓存、浏览器缓存 TTL 0、HTTPS、WebSocket、中国大陆网络优化。勾选 DNS CNAME 后，站点创建成功才会把 @ 和 * 指向共享 CNAME。</div>
     </section>
 
     <section class="split">
@@ -679,7 +740,7 @@ HTML = r"""<!doctype html>
       </div>
       <div class="results">
         <table>
-          <thead><tr><th>域名</th><th>状态</th><th>ZoneId</th><th>输出目录</th></tr></thead>
+          <thead><tr><th>域名</th><th>状态</th><th>ZoneId</th><th>DNS CNAME</th><th>输出目录</th></tr></thead>
           <tbody id="results"></tbody>
         </table>
       </div>
@@ -783,12 +844,14 @@ HTML = r"""<!doctype html>
         host_header: $("host_header").value,
         auto_cert: $("auto_cert").checked,
         enable_origin_acl: $("enable_origin_acl").checked,
+        configure_dns_cname: $("configure_dns_cname").checked,
         config_json: $("config_json").value,
         plan_id: $("plan_id").value,
         env_file: $("env_file").value,
         dns_env_file: $("dns_env_file").value,
         http_origin_port: $("http_origin_port").value,
-        https_origin_port: $("https_origin_port").value
+        https_origin_port: $("https_origin_port").value,
+        dns_cname_ttl: $("dns_cname_ttl").value
       };
     }
 
@@ -832,6 +895,7 @@ HTML = r"""<!doctype html>
           <td>${escapeHtml(r.domain || "")}</td>
           <td>${escapeHtml(r.status || "")}</td>
           <td>${escapeHtml(r.zone_id || "")}</td>
+          <td>${escapeHtml(r.dns_cname_status || "")}</td>
           <td>${escapeHtml(r.output_dir || "")}</td>
         </tr>`).join("");
       if (["success", "failed"].includes(data.status) && pollTimer) {

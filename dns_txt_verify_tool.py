@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Add EdgeOne ownership TXT records to Alibaba Cloud DNS or Tencent DNSPod.
+Add EdgeOne ownership TXT records and CNAME records to Alibaba Cloud DNS or Tencent DNSPod.
 
 Default mode is dry-run. Use --apply --yes to create records.
 
@@ -26,6 +26,7 @@ import http.client
 import json
 import os
 import random
+import re
 import sys
 import time
 import urllib.error
@@ -633,6 +634,80 @@ def add_dnspod_txt(client: TencentCloudClient, domain: str, rr: str, value: str,
     return str(resp.get("RecordId") or "")
 
 
+def list_dnspod_records(
+    client: TencentCloudClient,
+    domain: str,
+    rr: str,
+    record_type: str,
+) -> list[dict[str, Any]]:
+    resp = client.call(
+        "DescribeRecordList",
+        {
+            "Domain": domain,
+            "Subdomain": rr,
+            "RecordType": record_type,
+            "Limit": 100,
+            "Offset": 0,
+        },
+    )
+    items = resp.get("RecordList") or resp.get("Records") or []
+    return items if isinstance(items, list) else []
+
+
+def add_dnspod_record(
+    client: TencentCloudClient,
+    domain: str,
+    rr: str,
+    record_type: str,
+    value: str,
+    ttl: int,
+) -> str:
+    payload = {
+        "Domain": domain,
+        "SubDomain": rr,
+        "RecordType": record_type,
+        "RecordLine": "默认",
+        "Value": value,
+        "TTL": ttl,
+        "Status": "ENABLE",
+    }
+    resp = client.call("CreateRecord", payload)
+    return str(resp.get("RecordId") or "")
+
+
+def upsert_dnspod_record(
+    client: TencentCloudClient,
+    domain: str,
+    rr: str,
+    record_type: str,
+    value: str,
+    ttl: int,
+) -> tuple[str, str]:
+    records = list_dnspod_records(client, domain, rr, record_type)
+    for record in records:
+        if str(record.get("Name") or record.get("SubDomain") or "") != rr:
+            continue
+        record_id = str(record.get("RecordId") or record.get("RecordID") or record.get("Id") or "")
+        if str(record.get("Value") or "") == value:
+            return record_id, "unchanged"
+        if record_id:
+            client.call(
+                "ModifyRecord",
+                {
+                    "Domain": domain,
+                    "RecordId": int(record_id),
+                    "SubDomain": rr,
+                    "RecordType": record_type,
+                    "RecordLine": record.get("Line") or record.get("RecordLine") or "默认",
+                    "Value": value,
+                    "TTL": ttl,
+                    "Status": "ENABLE",
+                },
+            )
+            return record_id, "updated"
+    return add_dnspod_record(client, domain, rr, record_type, value, ttl), "created"
+
+
 def add_dnspod_legacy_txt(client: DNSPodLegacyClient, domain: str, rr: str, value: str, ttl: int) -> str:
     resp = client.call(
         "Record.Create",
@@ -647,6 +722,68 @@ def add_dnspod_legacy_txt(client: DNSPodLegacyClient, domain: str, rr: str, valu
     )
     record = resp.get("record") or {}
     return str(record.get("id") or "")
+
+
+def list_dnspod_legacy_records(
+    client: DNSPodLegacyClient,
+    domain: str,
+    rr: str,
+    record_type: str,
+) -> list[dict[str, Any]]:
+    resp = client.call(
+        "Record.List",
+        {
+            "domain": domain,
+            "sub_domain": rr,
+            "record_type": record_type,
+        },
+    )
+    items = resp.get("records") or []
+    return items if isinstance(items, list) else []
+
+
+def upsert_dnspod_legacy_record(
+    client: DNSPodLegacyClient,
+    domain: str,
+    rr: str,
+    record_type: str,
+    value: str,
+    ttl: int,
+) -> tuple[str, str]:
+    records = list_dnspod_legacy_records(client, domain, rr, record_type)
+    for record in records:
+        if str(record.get("name") or "") != rr:
+            continue
+        record_id = str(record.get("id") or "")
+        if str(record.get("value") or "") == value:
+            return record_id, "unchanged"
+        if record_id:
+            client.call(
+                "Record.Modify",
+                {
+                    "domain": domain,
+                    "record_id": record_id,
+                    "sub_domain": rr,
+                    "record_type": record_type,
+                    "record_line": record.get("line") or "默认",
+                    "value": value,
+                    "ttl": ttl,
+                },
+            )
+            return record_id, "updated"
+    resp = client.call(
+        "Record.Create",
+        {
+            "domain": domain,
+            "sub_domain": rr,
+            "record_type": record_type,
+            "record_line": "默认",
+            "value": value,
+            "ttl": ttl,
+        },
+    )
+    record = resp.get("record") or {}
+    return str(record.get("id") or ""), "created"
 
 
 def add_alidns_txt(client: AliDnsClient, domain: str, rr: str, value: str, ttl: int) -> str:
@@ -664,7 +801,74 @@ def add_alidns_txt(client: AliDnsClient, domain: str, rr: str, value: str, ttl: 
     return str(resp.get("RecordId") or "")
 
 
-def cmd_add_txt(args: argparse.Namespace) -> int:
+def list_alidns_records(client: AliDnsClient, domain: str, rr: str, record_type: str) -> list[dict[str, Any]]:
+    resp = client.call(
+        "DescribeDomainRecords",
+        {
+            "DomainName": domain,
+            "RRKeyWord": rr,
+            "TypeKeyWord": record_type,
+            "PageNumber": 1,
+            "PageSize": 100,
+        },
+    )
+    container = resp.get("DomainRecords") or {}
+    items = container.get("Record") if isinstance(container, dict) else container
+    return items if isinstance(items, list) else []
+
+
+def upsert_alidns_record(
+    client: AliDnsClient,
+    domain: str,
+    rr: str,
+    record_type: str,
+    value: str,
+    ttl: int,
+) -> tuple[str, str]:
+    records = list_alidns_records(client, domain, rr, record_type)
+    for record in records:
+        if str(record.get("RR") or "") != rr or str(record.get("Type") or "").upper() != record_type:
+            continue
+        record_id = str(record.get("RecordId") or "")
+        if str(record.get("Value") or "") == value:
+            return record_id, "unchanged"
+        if record_id:
+            client.call(
+                "UpdateDomainRecord",
+                {
+                    "RecordId": record_id,
+                    "RR": rr,
+                    "Type": record_type,
+                    "Value": value,
+                    "TTL": ttl,
+                    "Line": record.get("Line") or "default",
+                },
+            )
+            return record_id, "updated"
+    return add_alidns_record(client, domain, rr, record_type, value, ttl), "created"
+
+
+def add_alidns_record(client: AliDnsClient, domain: str, rr: str, record_type: str, value: str, ttl: int) -> str:
+    resp = client.call(
+        "AddDomainRecord",
+        {
+            "DomainName": domain,
+            "RR": rr,
+            "Type": record_type,
+            "Value": value,
+            "TTL": ttl,
+            "Line": "default",
+        },
+    )
+    return str(resp.get("RecordId") or "")
+
+
+def load_dns_context(args: argparse.Namespace) -> tuple[
+    dict[str, set[str]],
+    dict[str, DNSPodLegacyClient],
+    TencentCloudClient | None,
+    dict[str, AliDnsClient],
+]:
     load_env_file(args.env_file)
     config = load_yaml_file(args.config_file)
     dnspod = None if args.no_dnspod else make_dnspod_client(args)
@@ -673,7 +877,7 @@ def cmd_add_txt(args: argparse.Namespace) -> int:
     if args.domain_cache_json and os.path.exists(args.domain_cache_json):
         provider_domains = read_domain_cache(args.domain_cache_json)
     else:
-        provider_domains: dict[str, set[str]] = {}
+        provider_domains = {}
         if dnspod:
             provider_domains["dnspod"] = list_dnspod_domains(dnspod)
         for key, client in dnspod_legacy_clients.items():
@@ -684,12 +888,16 @@ def cmd_add_txt(args: argparse.Namespace) -> int:
             write_domain_cache(args.domain_cache_json, provider_domains)
     if not provider_domains:
         raise SystemExit(f"No DNS credentials found. Fill {args.env_file}.")
-
     print(
         "Loaded DNS domains: "
         + ", ".join(f"{provider}={len(domains)}" for provider, domains in provider_domains.items()),
         file=sys.stderr,
     )
+    return provider_domains, dnspod_legacy_clients, dnspod, alidns_clients
+
+
+def cmd_add_txt(args: argparse.Namespace) -> int:
+    provider_domains, dnspod_legacy_clients, dnspod, alidns_clients = load_dns_context(args)
     rows = read_txt_rows(args.csv)
     results: list[dict[str, str]] = []
     failures = 0
@@ -767,6 +975,109 @@ def cmd_add_txt(args: argparse.Namespace) -> int:
     return 2 if failures else 0
 
 
+def split_records(value: str) -> list[str]:
+    records: list[str] = []
+    seen: set[str] = set()
+    for item in re.split(r"[\s,;]+", value.strip()):
+        rr = item.strip().strip(".")
+        if not rr:
+            continue
+        if rr == "@" or rr == "*":
+            normalized = rr
+        elif DOMAIN_RE.match(rr):
+            normalized = rr.lower()
+        else:
+            raise SystemExit(f"Invalid record name: {item}")
+        if normalized not in seen:
+            records.append(normalized)
+            seen.add(normalized)
+    if not records:
+        raise SystemExit("No CNAME records specified.")
+    return records
+
+
+def cmd_add_cname(args: argparse.Namespace) -> int:
+    provider_domains, dnspod_legacy_clients, dnspod, alidns_clients = load_dns_context(args)
+    zones = split_records(args.zone_names)
+    records = split_records(args.records)
+    results: list[dict[str, str]] = []
+    failures = 0
+    for zone_name in zones:
+        provider, root_domain = find_managed_domain(zone_name, provider_domains)
+        for record_name in records:
+            result = {
+                "zone_name": zone_name,
+                "record_name": record_name,
+                "record_value": args.target,
+                "provider": provider or "",
+                "root_domain": root_domain or "",
+                "rr": "",
+                "record_id": "",
+                "status": "planned",
+                "error": "",
+            }
+            if not provider or not root_domain:
+                failures += 1
+                result["status"] = "failed"
+                result["error"] = "No matching domain found in AliDNS or DNSPod account"
+                results.append(result)
+                continue
+            rr = record_rr(record_name, zone_name, root_domain)
+            result["rr"] = rr
+            print(f"{provider} {root_domain} CNAME {rr} = {args.target}")
+            if args.apply:
+                if not args.yes:
+                    raise SystemExit("Refusing to apply without --yes.")
+                try:
+                    if provider == "dnspod":
+                        if not dnspod:
+                            raise ApiError("DNSPod client is not configured")
+                        result["record_id"], result["status"] = upsert_dnspod_record(
+                            dnspod, root_domain, rr, "CNAME", args.target, args.ttl
+                        )
+                    elif provider and provider.startswith("dnspod_legacy:"):
+                        client = dnspod_legacy_clients.get(provider)
+                        if not client:
+                            raise ApiError(f"DNSPod legacy client is not configured: {provider}")
+                        result["record_id"], result["status"] = upsert_dnspod_legacy_record(
+                            client, root_domain, rr, "CNAME", args.target, args.ttl
+                        )
+                    elif provider and provider.startswith("alidns"):
+                        client = alidns_clients.get(provider)
+                        if not client:
+                            raise ApiError(f"AliDNS client is not configured: {provider}")
+                        result["record_id"], result["status"] = upsert_alidns_record(
+                            client, root_domain, rr, "CNAME", args.target, args.ttl
+                        )
+                except Exception as exc:
+                    failures += 1
+                    result["status"] = "failed"
+                    result["error"] = str(exc)
+            results.append(result)
+
+    with open(args.out, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "zone_name",
+                "record_name",
+                "record_value",
+                "provider",
+                "root_domain",
+                "rr",
+                "record_id",
+                "status",
+                "error",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(results)
+    print(f"Wrote result CSV: {args.out}")
+    if not args.apply:
+        print("Dry-run only. Add --apply --yes to create CNAME records.")
+    return 2 if failures else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Add ownership TXT records to AliDNS or DNSPod.")
     parser.add_argument("--env-file", default=DEFAULT_ENV_FILE)
@@ -787,6 +1098,20 @@ def build_parser() -> argparse.ArgumentParser:
     add_txt.add_argument("--apply", action="store_true")
     add_txt.add_argument("--yes", action="store_true")
     add_txt.set_defaults(func=cmd_add_txt)
+
+    add_cname = sub.add_parser("add-cname", help="Add or update CNAME records for zone names.")
+    add_cname.add_argument("--zone-names", required=True, help="Zone names separated by comma, semicolon, or whitespace.")
+    add_cname.add_argument("--records", default="@,*", help="Record names to set, default: @,*")
+    add_cname.add_argument("--target", required=True, help="CNAME target value.")
+    add_cname.add_argument("--out", default="dns-cname-add-result.csv")
+    add_cname.add_argument("--ttl", type=int, default=600)
+    add_cname.add_argument("--no-dnspod", action="store_true", help="Skip Tencent DNSPod API 3.0.")
+    add_cname.add_argument("--no-alidns", action="store_true", help="Skip Alibaba Cloud DNS.")
+    add_cname.add_argument("--no-legacy-dnspod", action="store_true", help="Ignore DNSPod legacy token config.")
+    add_cname.add_argument("--domain-cache-json", help="Reuse or write DNS provider domain list cache.")
+    add_cname.add_argument("--apply", action="store_true")
+    add_cname.add_argument("--yes", action="store_true")
+    add_cname.set_defaults(func=cmd_add_cname)
 
     cache_domains = sub.add_parser("cache-domains", help="Cache managed domains from DNS providers.")
     cache_domains.add_argument("--out", required=True)
