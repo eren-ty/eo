@@ -15,20 +15,22 @@
 
 ## 运行
 
-把这个项目放在服务器上，确保 `/opt/tx-eo` 是现有迁移脚本仓库，并且里面有：
+把这个项目放在服务器上。本仓库已经包含创建站点需要的脚本和默认配置模板：
 
 - `tencent_eo_origin_tool.py`
 - `dns_txt_verify_tool.py`
+- `eo-zone-configs/178zq2.com_zone-3rrr4v0d08us.json`
+
+你只需要把密钥文件放进仓库目录：
+
 - `tencent-eo-new.env`
 - `dns-providers.env`
-- `eo-zone-configs/178zq2.com_zone-3rrr4v0d08us.json`
 
 启动：
 
 ```bash
 cd /opt/eo-site-creator
 python3 app.py \
-  --tx-eo-dir /opt/tx-eo \
   --host 0.0.0.0 \
   --port 8088
 ```
@@ -61,6 +63,17 @@ eo-zone-configs/178zq2.com_zone-3rrr4v0d08us.json
 ```
 
 这个模板应保持为你现在使用的标准配置：HTTPS、WebSocket、中国大陆网络优化、节点缓存/浏览器缓存不缓存。
+
+## 可选：继续使用外部 tx-eo 目录
+
+如果要临时使用 `/opt/tx-eo` 里的脚本，也可以显式传：
+
+```bash
+python3 app.py \
+  --tx-eo-dir /opt/tx-eo \
+  --host 0.0.0.0 \
+  --port 8088
+```
 
 ## 注意
 

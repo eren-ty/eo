@@ -1,0 +1,109 @@
+{
+  "FormatVersion": "1.0",
+  "Rules": [],
+  "ZoneConfig": {
+    "AccelerateMainland": {
+      "Switch": "on"
+    },
+    "Cache": {
+      "CustomTime": {
+        "CacheTime": 2592000,
+        "Switch": "off"
+      },
+      "FollowOrigin": {
+        "DefaultCache": "off",
+        "DefaultCacheStrategy": "off",
+        "DefaultCacheTime": 0,
+        "Switch": "on"
+      },
+      "NoCache": {
+        "Switch": "off"
+      }
+    },
+    "CacheKey": {
+      "FullURLCache": "on",
+      "IgnoreCase": "off",
+      "QueryString": {
+        "Action": "includeCustom",
+        "Switch": "off"
+      }
+    },
+    "CachePrefresh": {
+      "CacheTimePercent": 90,
+      "Switch": "off"
+    },
+    "ClientIPCountry": {
+      "Switch": "off"
+    },
+    "ClientIPHeader": {
+      "Switch": "off"
+    },
+    "Compression": {
+      "Algorithms": [
+        "brotli",
+        "gzip"
+      ],
+      "Switch": "on"
+    },
+    "ForceRedirectHTTPS": {
+      "RedirectStatusCode": 301,
+      "Switch": "on"
+    },
+    "HSTS": {
+      "IncludeSubDomains": "off",
+      "Preload": "off",
+      "Switch": "off",
+      "Timeout": 0
+    },
+    "HTTP2": {
+      "Switch": "off"
+    },
+    "IPv6": {
+      "Switch": "off"
+    },
+    "MaxAge": {
+      "CacheTime": 0,
+      "FollowOrigin": "off"
+    },
+    "NetworkErrorLogging": {
+      "Switch": "off"
+    },
+    "OCSPStapling": {
+      "Switch": "off"
+    },
+    "OfflineCache": {
+      "Switch": "off"
+    },
+    "PostMaxSize": {
+      "MaxSize": 838860800,
+      "Switch": "on"
+    },
+    "QUIC": {
+      "Switch": "off"
+    },
+    "SmartRouting": {
+      "Switch": "on"
+    },
+    "StandardDebug": {
+      "Expires": "1970-01-01T00:00:00Z",
+      "Switch": "off"
+    },
+    "TLSConfig": {
+      "CipherSuite": "loose-v2023",
+      "Version": [
+        "TLSv1.2",
+        "TLSv1.3"
+      ]
+    },
+    "UpstreamHTTP2": {
+      "Switch": "off"
+    },
+    "WebSocket": {
+      "Switch": "on",
+      "Timeout": 60
+    },
+    "gRPC": {
+      "Switch": "off"
+    }
+  }
+}

@@ -836,7 +836,11 @@ class Handler(BaseHTTPRequestHandler):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Internal EdgeOne batch site creator web console.")
-    parser.add_argument("--tx-eo-dir", default=os.environ.get("TX_EO_DIR", "/opt/tx-eo"))
+    parser.add_argument(
+        "--tx-eo-dir",
+        default=os.environ.get("TX_EO_DIR", str(Path(__file__).resolve().parent)),
+        help="Directory containing tencent_eo_origin_tool.py and dns_txt_verify_tool.py. Default: this repo.",
+    )
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--env-file", default="tencent-eo-new.env")
