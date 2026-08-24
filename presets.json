@@ -1,0 +1,60 @@
+{
+  "origin_cname_presets": [
+    {
+      "label": "178 Web",
+      "origin": "source-178.gtmvip.com",
+      "cname": "178-web.3rr2n4ammrbn.share.dnse4.com"
+    },
+    {
+      "label": "178 API",
+      "origin": "source-178-api.gtmvip.com",
+      "cname": "178-api.3rr2n4ammrbn.share.dnse4.com"
+    },
+    {
+      "label": "GQJ Web",
+      "origin": "source-gqj.gtmvip.com",
+      "cname": "gqj-web.3rr2n4ammrbn.share.dnse4.com"
+    },
+    {
+      "label": "GQJ API",
+      "origin": "source-gqj-api.gtmvip.com",
+      "cname": "gqj-api.3rr2n4ammrbn.share.dnse4.com"
+    },
+    {
+      "label": "GQJIM API",
+      "origin": "source-gqjim.gtmvip.com",
+      "cname": "gqjim-api.3rr2n4ammrbn.share.dnse4.com"
+    },
+    {
+      "label": "360 Web",
+      "origin": "source-360.gtmvip.com",
+      "cname": "360-web.3rr2n4ammrbn.share.dnse4.com"
+    },
+    {
+      "label": "360 API",
+      "origin": "source-360ba-api.gtmvip.com",
+      "cname": "360-api.3rr2n4ammrbn.share.dnse4.com"
+    },
+    {
+      "label": "Liaoba Web",
+      "origin": "source-liaoba.gtmvip.com",
+      "cname": "liaoba-web.3rr2n4ammrbn.share.dnse4.com"
+    },
+    {
+      "label": "Transit",
+      "origin": "source-transit.gtmvip.com",
+      "cname": "transit.3rr2n4ammrbn.share.dnse4.com"
+    },
+    {
+      "label": "Tencent General",
+      "origin": "",
+      "cname": "tencent.3rr2n4ammrbn.share.dnse4.com"
+    }
+  ],
+  "dns_env_presets": [
+    "dns-providers.env",
+    "dns-providers-new.env",
+    "dns-providers-prod.env",
+    "dns-providers-ali.env"
+  ]
+}

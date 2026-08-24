@@ -36,6 +36,7 @@ DEFAULT_AREA = "overseas"
 DEFAULT_OUTPUT_ROOT = "onboard-results-web"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8088
+DEFAULT_PRESETS_JSON = "presets.json"
 
 DOMAIN_RE = re.compile(r"^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", re.I)
 
@@ -118,6 +119,10 @@ class AppState:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.tx_eo_dir = Path(args.tx_eo_dir).resolve()
+        presets_path = Path(args.presets_json)
+        if not presets_path.is_absolute():
+            presets_path = Path(__file__).resolve().parent / presets_path
+        self.presets_path = presets_path
         self.jobs: dict[str, Job] = {}
         self.queue: queue.Queue[Job] = queue.Queue()
         self.template_cache: dict[str, Any] = {"loaded_at": 0.0, "items": []}
@@ -133,6 +138,23 @@ class AppState:
     def get_job(self, job_id: str) -> Job | None:
         with self.lock:
             return self.jobs.get(job_id)
+
+
+def load_presets() -> dict[str, Any]:
+    if not STATE.presets_path.exists():
+        return {"origin_cname_presets": [], "dns_env_presets": [STATE.args.dns_env_file]}
+    with STATE.presets_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    origin_presets = data.get("origin_cname_presets") or []
+    dns_env_presets = data.get("dns_env_presets") or [STATE.args.dns_env_file]
+    if not isinstance(origin_presets, list):
+        origin_presets = []
+    if not isinstance(dns_env_presets, list):
+        dns_env_presets = [STATE.args.dns_env_file]
+    return {
+        "origin_cname_presets": origin_presets,
+        "dns_env_presets": dns_env_presets,
+    }
 
 
 STATE: AppState
@@ -668,67 +690,21 @@ HTML = r"""<!doctype html>
     const $ = (id) => document.getElementById(id);
     let currentJob = null;
     let pollTimer = null;
-    const originCnamePresets = [
-      {
-        label: "178 Web",
-        origin: "source-178.gtmvip.com",
-        cname: "178-web.3rr2n4ammrbn.share.dnse4.com"
-      },
-      {
-        label: "178 API",
-        origin: "source-178-api.gtmvip.com",
-        cname: "178-api.3rr2n4ammrbn.share.dnse4.com"
-      },
-      {
-        label: "GQJ Web",
-        origin: "source-gqj.gtmvip.com",
-        cname: "gqj-web.3rr2n4ammrbn.share.dnse4.com"
-      },
-      {
-        label: "GQJ API",
-        origin: "source-gqj-api.gtmvip.com",
-        cname: "gqj-api.3rr2n4ammrbn.share.dnse4.com"
-      },
-      {
-        label: "GQJIM API",
-        origin: "source-gqjim.gtmvip.com",
-        cname: "gqjim-api.3rr2n4ammrbn.share.dnse4.com"
-      },
-      {
-        label: "360 Web",
-        origin: "source-360.gtmvip.com",
-        cname: "360-web.3rr2n4ammrbn.share.dnse4.com"
-      },
-      {
-        label: "360 API",
-        origin: "source-360ba-api.gtmvip.com",
-        cname: "360-api.3rr2n4ammrbn.share.dnse4.com"
-      },
-      {
-        label: "聊吧 Web",
-        origin: "source-liaoba.gtmvip.com",
-        cname: "liaoba-web.3rr2n4ammrbn.share.dnse4.com"
-      },
-      {
-        label: "Transit",
-        origin: "source-transit.gtmvip.com",
-        cname: "transit.3rr2n4ammrbn.share.dnse4.com"
-      },
-      {
-        label: "Tencent 通用",
-        origin: "",
-        cname: "tencent.3rr2n4ammrbn.share.dnse4.com"
-      }
-    ];
-    const dnsEnvPresets = [
-      "dns-providers.env",
-      "dns-providers-new.env",
-      "dns-providers-prod.env",
-      "dns-providers-ali.env"
-    ];
+    let originCnamePresets = [];
 
-    function initPresets() {
+    async function initPresets() {
+      let dnsEnvPresets = ["dns-providers.env"];
+      try {
+        const res = await fetch("/api/presets?ts=" + Date.now());
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "load presets failed");
+        originCnamePresets = data.origin_cname_presets || [];
+        dnsEnvPresets = data.dns_env_presets || dnsEnvPresets;
+      } catch (err) {
+        appendLog("加载预设失败: " + err.message);
+      }
       const preset = $("origin_cname_preset");
+      preset.innerHTML = '<option value="">自定义</option>';
       for (const item of originCnamePresets) {
         const opt = document.createElement("option");
         opt.value = item.label;
@@ -741,10 +717,13 @@ HTML = r"""<!doctype html>
         if (item.origin) $("origin").value = item.origin;
         $("shared_cname").value = item.cname;
       });
-      preset.value = "178 Web";
-      preset.dispatchEvent(new Event("change"));
+      if (originCnamePresets.length) {
+        preset.value = originCnamePresets[0].label;
+        preset.dispatchEvent(new Event("change"));
+      }
 
       const dnsPreset = $("dns_env_preset");
+      dnsPreset.innerHTML = "";
       for (const value of dnsEnvPresets) {
         const opt = document.createElement("option");
         opt.value = value;
@@ -908,6 +887,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"error": str(exc)}, status=500)
             return
+        if parsed.path == "/api/presets":
+            try:
+                self.send_json(load_presets())
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=500)
+            return
         if parsed.path.startswith("/api/jobs/"):
             job_id = parsed.path.rsplit("/", 1)[-1]
             job = STATE.get_job(job_id)
@@ -953,6 +938,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--area", default=DEFAULT_AREA)
     parser.add_argument("--config-json", default=DEFAULT_CONFIG_JSON)
     parser.add_argument("--output-root", default=DEFAULT_OUTPUT_ROOT)
+    parser.add_argument("--presets-json", default=DEFAULT_PRESETS_JSON)
     return parser
 
 

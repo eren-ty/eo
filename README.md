@@ -65,6 +65,32 @@ eo-zone-configs/178zq2.com_zone-3rrr4v0d08us.json
 
 这个模板应保持为你现在使用的标准配置：HTTPS、WebSocket、中国大陆网络优化、节点缓存/浏览器缓存不缓存。
 
+## 添加页面预设
+
+页面里的源站、共享 CNAME、DNS env 预设都在：
+
+```text
+presets.json
+```
+
+新增一组源站和共享 CNAME：
+
+```json
+{
+  "label": "新的预设名",
+  "origin": "source-example.gtmvip.com",
+  "cname": "example.3rr2n4ammrbn.share.dnse4.com"
+}
+```
+
+新增 DNS env 文件名：
+
+```json
+"dns-providers-other.env"
+```
+
+改完后刷新页面即可。为了避免浏览器缓存，建议强制刷新一次。
+
 ## 可选：继续使用外部 tx-eo 目录
 
 如果要临时使用 `/opt/tx-eo` 里的脚本，也可以显式传：
