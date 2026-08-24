@@ -245,7 +245,7 @@ def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], templat
     client = teo.require_credentials(Args())
     payloads = [
         {
-            "ZoneId": template_zone_id,
+            "ZoneId": zone_id,
             "TemplateId": template_id,
             "Entities": hosts,
             "Operate": "bind",
@@ -253,6 +253,13 @@ def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], templat
         },
         {
             "ZoneId": template_zone_id,
+            "TemplateId": template_id,
+            "Entities": hosts,
+            "Operate": "bind",
+            "OverWrite": True,
+        },
+        {
+            "ZoneId": zone_id,
             "TemplateId": template_id,
             "Entity": hosts,
             "Operate": "bind",
@@ -268,7 +275,11 @@ def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], templat
             return
         except Exception as exc:
             last_error = exc
-    job.log(f"Web protection template bind failed for {', '.join(hosts)}: {last_error}")
+    job.log(
+        "Web protection template bind failed for "
+        + f"{', '.join(hosts)}: {last_error}; "
+        + f"template_zone_id={template_zone_id}, target_zone_id={zone_id}, template_id={template_id}"
+    )
 
 
 def build_onboard_command(domain: str, payload: dict[str, Any], zone_output_dir: Path) -> list[str]:
