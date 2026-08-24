@@ -38,6 +38,7 @@ from typing import Any
 
 DEFAULT_ENV_FILE = "dns-providers.env"
 DEFAULT_CONFIG_FILE = "dns-providers.yaml"
+DOMAIN_RE = re.compile(r"^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", re.I)
 
 
 class ApiError(RuntimeError):
