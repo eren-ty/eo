@@ -283,7 +283,38 @@ def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], templat
     )
 
 
-def build_onboard_command(domain: str, payload: dict[str, Any], zone_output_dir: Path) -> list[str]:
+def resolve_tx_eo_path(path_value: str) -> Path:
+    path = Path(path_value)
+    if path.is_absolute():
+        return path
+    return STATE.tx_eo_dir / path
+
+
+def config_for_domain(job: Job, domain: str, payload: dict[str, Any], zone_output_dir: Path) -> str:
+    mode = payload.get("accelerate_mainland", "template")
+    if mode == "template":
+        return payload["config_json"]
+    if mode not in {"on", "off"}:
+        raise ValueError(f"invalid accelerate mainland mode: {mode}")
+
+    source = resolve_tx_eo_path(payload["config_json"])
+    with source.open("r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    zone_config = config.setdefault("ZoneConfig", {})
+    accelerate = zone_config.setdefault("AccelerateMainland", {})
+    accelerate["Switch"] = mode
+
+    target = zone_output_dir / f"config-{safe_name(domain)}-mainland-{mode}.json"
+    with target.open("w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    job.log(f"Using generated config for {domain}: AccelerateMainland.Switch={mode} {target}")
+    return str(target)
+
+
+def build_onboard_command(job: Job, domain: str, payload: dict[str, Any], zone_output_dir: Path) -> list[str]:
+    config_json = config_for_domain(job, domain, payload, zone_output_dir)
     cmd = [
         sys.executable,
         str(STATE.tx_eo_dir / "tencent_eo_origin_tool.py"),
@@ -305,7 +336,7 @@ def build_onboard_command(domain: str, payload: dict[str, Any], zone_output_dir:
         "--verify-wait-seconds",
         str(payload["verify_wait_seconds"]),
         "--config-json",
-        payload["config_json"],
+        config_json,
         "--origin",
         payload["origin"],
         "--origin-type",
@@ -424,7 +455,7 @@ def run_job(job: Job) -> None:
         zone_output_dir = output_root / f"{index:03d}-{safe_name(domain)}"
         zone_output_dir.mkdir(parents=True, exist_ok=True)
         job.log(f"Start {index}/{len(domains)} {domain}")
-        cmd = build_onboard_command(domain, payload, zone_output_dir)
+        cmd = build_onboard_command(job, domain, payload, zone_output_dir)
         job.log("Command: " + " ".join(cmd))
 
         started = now_iso()
@@ -528,6 +559,7 @@ def parse_create_payload(raw: dict[str, Any]) -> dict[str, Any]:
         "output_root": str(raw.get("output_root") or STATE.args.output_root),
         "origin_type": str(raw.get("origin_type") or "IP_DOMAIN"),
         "origin_protocol": str(raw.get("origin_protocol") or "FOLLOW"),
+        "accelerate_mainland": str(raw.get("accelerate_mainland") or "template"),
         "http_origin_port": int_value("http_origin_port", 80),
         "https_origin_port": int_value("https_origin_port", 443),
         "host_header": host_header,
@@ -720,6 +752,14 @@ HTML = r"""<!doctype html>
           </select>
         </div>
         <div>
+          <label for="accelerate_mainland">中国大陆网络优化</label>
+          <select id="accelerate_mainland">
+            <option value="template">按配置模板</option>
+            <option value="on">开启</option>
+            <option value="off">关闭</option>
+          </select>
+        </div>
+        <div>
           <label for="host_header_mode">回源 HOST 头</label>
           <select id="host_header_mode">
             <option value="accelerated">使用加速域名</option>
@@ -895,6 +935,7 @@ HTML = r"""<!doctype html>
         shared_cname: $("shared_cname").value,
         web_template_ref: $("web_template").value,
         origin_protocol: $("origin_protocol").value,
+        accelerate_mainland: $("accelerate_mainland").value,
         host_header_mode: $("host_header_mode").value,
         host_header: $("host_header").value,
         auto_cert: $("auto_cert").checked,
