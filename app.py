@@ -245,13 +245,6 @@ def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], templat
     client = teo.require_credentials(Args())
     payloads = [
         {
-            "ZoneId": zone_id,
-            "TemplateId": template_id,
-            "Entities": hosts,
-            "Operate": "bind",
-            "OverWrite": True,
-        },
-        {
             "ZoneId": template_zone_id,
             "TemplateId": template_id,
             "Entities": hosts,
@@ -261,24 +254,32 @@ def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], templat
         {
             "ZoneId": zone_id,
             "TemplateId": template_id,
-            "Entity": hosts,
+            "Entities": hosts,
             "Operate": "bind",
             "OverWrite": True,
         },
     ]
+    actions = ["OperateSecurityTemplate", "BindSecurityTemplateToEntity"]
 
     last_error: Exception | None = None
-    for payload in payloads:
-        try:
-            response = client.call("BindSecurityTemplateToEntity", payload)
-            job.log(f"Web protection template bound to {', '.join(hosts)}: {json.dumps(response, ensure_ascii=False)}")
-            return
-        except Exception as exc:
-            last_error = exc
+    attempted: list[str] = []
+    for action in actions:
+        for payload in payloads:
+            attempted.append(f"{action}/ZoneId={payload['ZoneId']}")
+            try:
+                response = client.call(action, payload)
+                job.log(
+                    f"Web protection template bound to {', '.join(hosts)} "
+                    f"using {action}: {json.dumps(response, ensure_ascii=False)}"
+                )
+                return
+            except Exception as exc:
+                last_error = exc
     job.log(
         "Web protection template bind failed for "
         + f"{', '.join(hosts)}: {last_error}; "
-        + f"template_zone_id={template_zone_id}, target_zone_id={zone_id}, template_id={template_id}"
+        + f"template_zone_id={template_zone_id}, target_zone_id={zone_id}, "
+        + f"template_id={template_id}, attempted={';'.join(attempted)}"
     )
 
 
