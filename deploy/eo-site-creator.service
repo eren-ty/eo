@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/eo-site-creator
 Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/eo-site-creator/eo-site-creator.env
 ExecStart=/bin/python3 /opt/eo-site-creator/app.py --host 0.0.0.0 --port 8088
 Restart=always
 RestartSec=3

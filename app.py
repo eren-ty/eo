@@ -13,12 +13,15 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
+import hashlib
 import html
+import hmac
 import json
 import os
 from pathlib import Path
 import queue
 import re
+import secrets
 import subprocess
 import sys
 import threading
@@ -126,6 +129,8 @@ class AppState:
         self.jobs: dict[str, Job] = {}
         self.queue: queue.Queue[Job] = queue.Queue()
         self.template_cache: dict[str, Any] = {"loaded_at": 0.0, "items": []}
+        self.sessions: dict[str, float] = {}
+        self.session_secret = args.session_secret or secrets.token_hex(32)
         self.lock = threading.Lock()
 
     def create_job(self, payload: dict[str, Any]) -> Job:
@@ -138,6 +143,29 @@ class AppState:
     def get_job(self, job_id: str) -> Job | None:
         with self.lock:
             return self.jobs.get(job_id)
+
+    def create_session(self) -> str:
+        token = secrets.token_urlsafe(32)
+        with self.lock:
+            self.sessions[token] = time.time() + 86400
+        return token
+
+    def valid_session(self, token: str) -> bool:
+        if not token:
+            return False
+        with self.lock:
+            expires_at = self.sessions.get(token)
+            if not expires_at:
+                return False
+            if expires_at < time.time():
+                self.sessions.pop(token, None)
+                return False
+            self.sessions[token] = time.time() + 86400
+            return True
+
+    def destroy_session(self, token: str) -> None:
+        with self.lock:
+            self.sessions.pop(token, None)
 
 
 def load_presets() -> dict[str, Any]:
@@ -158,6 +186,30 @@ def load_presets() -> dict[str, Any]:
 
 
 STATE: AppState
+
+
+def auth_enabled() -> bool:
+    return bool(getattr(STATE.args, "auth_password", ""))
+
+
+def verify_password(password: str) -> bool:
+    expected = STATE.args.auth_password or ""
+    return hmac.compare_digest(password.encode("utf-8"), expected.encode("utf-8"))
+
+
+def parse_cookie(header: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for item in header.split(";"):
+        if "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        result[key.strip()] = value.strip()
+    return result
+
+
+def cache_buster() -> str:
+    seed = str(STATE.args.session_secret or "") + str(STATE.args.auth_user or "")
+    return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:8]
 
 
 def load_templates(refresh: bool = False) -> list[dict[str, Any]]:
@@ -586,111 +638,147 @@ HTML = r"""<!doctype html>
   <style>
     :root {
       color-scheme: light;
-      --bg: #f5f7fb;
+      --bg: #eef3fb;
       --panel: #ffffff;
-      --line: #d8dee9;
-      --text: #1f2937;
-      --muted: #6b7280;
+      --panel-soft: #f8fbff;
+      --line: #d8e1ee;
+      --line-strong: #c8d4e5;
+      --text: #172033;
+      --muted: #64748b;
       --blue: #1463ff;
       --blue-dark: #0d47c8;
       --red: #c0342b;
       --green: #0a8f4b;
       --amber: #9a6700;
+      --shadow: 0 12px 36px rgba(15, 23, 42, .08);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
+      background:
+        radial-gradient(circle at top left, rgba(20, 99, 255, .12), transparent 34rem),
+        linear-gradient(180deg, #f7faff 0, var(--bg) 260px);
       color: var(--text);
       font-size: 14px;
     }
     header {
-      height: 56px;
+      min-height: 68px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 24px;
+      gap: 16px;
+      padding: 0 28px;
       border-bottom: 1px solid var(--line);
-      background: #fff;
+      background: rgba(255, 255, 255, .88);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 5;
     }
+    .brand { display: flex; flex-direction: column; gap: 3px; }
     h1 {
       margin: 0;
-      font-size: 18px;
-      font-weight: 650;
+      font-size: 20px;
+      font-weight: 750;
       letter-spacing: 0;
     }
+    .subtitle { color: var(--muted); font-size: 12px; }
+    .header-actions { display: flex; align-items: center; gap: 10px; }
     main {
       display: grid;
-      grid-template-columns: minmax(460px, 600px) 1fr;
-      gap: 16px;
-      padding: 16px;
-      min-height: calc(100vh - 56px);
+      grid-template-columns: minmax(500px, 680px) minmax(0, 1fr);
+      gap: 18px;
+      padding: 18px;
+      min-height: calc(100vh - 68px);
     }
     section {
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
     }
-    .form { padding: 18px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    .form { padding: 22px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+    label { display: block; font-weight: 700; margin-bottom: 7px; }
     input, textarea, select {
       width: 100%;
-      border: 1px solid #cfd6e2;
-      border-radius: 4px;
-      padding: 9px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px 12px;
       font: inherit;
       background: #fff;
-      min-height: 38px;
+      min-height: 42px;
+      color: var(--text);
+      outline: none;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(20, 99, 255, .12);
     }
     textarea { min-height: 120px; resize: vertical; }
     .full { grid-column: 1 / -1; }
     .hint { color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.4; }
     .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    .check { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+    .check { display: flex; align-items: center; gap: 8px; font-weight: 650; }
     .check input { width: 16px; min-height: 16px; }
     details {
       border-top: 1px solid var(--line);
-      margin-top: 16px;
-      padding-top: 14px;
+      margin-top: 18px;
+      padding-top: 16px;
     }
     summary { cursor: pointer; font-weight: 650; }
     button {
       border: 1px solid var(--blue);
       background: var(--blue);
       color: #fff;
-      border-radius: 4px;
-      height: 38px;
-      padding: 0 16px;
-      font-weight: 650;
+      border-radius: 8px;
+      height: 40px;
+      padding: 0 18px;
+      font-weight: 750;
       cursor: pointer;
+      transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
     }
+    button:hover { background: var(--blue-dark); box-shadow: 0 8px 20px rgba(20, 99, 255, .18); }
+    button:active { transform: translateY(1px); }
     button.secondary { background: #fff; color: var(--blue); }
+    button.secondary:hover { background: #f5f8ff; }
     button:disabled { opacity: .6; cursor: not-allowed; }
+    .logout {
+      height: 32px;
+      padding: 0 12px;
+      border-color: #cbd5e1;
+      color: #475569;
+      font-size: 12px;
+    }
+    .primary-action { min-width: 110px; }
     .toolbar {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 14px 16px;
+      padding: 16px 18px;
       border-bottom: 1px solid var(--line);
+      background: var(--panel-soft);
     }
     .status { font-weight: 700; }
     .status.success { color: var(--green); }
     .status.failed { color: var(--red); }
     .status.running, .status.queued { color: var(--amber); }
-    .results { padding: 0 16px 16px; }
+    .results { padding: 0 18px 18px; overflow: auto; }
     table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid var(--line); padding: 9px 6px; text-align: left; vertical-align: top; }
+    th, td { border-bottom: 1px solid var(--line); padding: 11px 8px; text-align: left; vertical-align: top; }
     th { color: var(--muted); font-weight: 650; }
+    tbody tr:hover { background: #f8fbff; }
     pre {
       margin: 0;
-      height: 360px;
+      height: 390px;
       overflow: auto;
-      background: #101827;
+      background: #0f172a;
       color: #d7e0ef;
-      padding: 12px;
-      border-radius: 0 0 6px 6px;
+      padding: 14px 16px;
+      border-top: 1px solid #1e293b;
       font-size: 12px;
       line-height: 1.45;
       white-space: pre-wrap;
@@ -708,26 +796,47 @@ HTML = r"""<!doctype html>
       font-size: 12px;
       font-weight: 650;
     }
+    .field-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+      background: var(--panel-soft);
+    }
+    .compact-note {
+      border-left: 3px solid var(--blue);
+      background: #f4f7ff;
+      padding: 10px 12px;
+      border-radius: 8px;
+      color: #475569;
+    }
     @media (max-width: 980px) {
       main { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
+      header { align-items: flex-start; padding: 14px 18px; flex-direction: column; }
+      .header-actions { width: 100%; justify-content: space-between; }
     }
   </style>
 </head>
 <body>
   <header>
-    <h1>EdgeOne 站点创建</h1>
-    <span class="pill">新账号批量创建 @ 和 *</span>
+    <div class="brand">
+      <h1>EdgeOne 站点创建</h1>
+      <div class="subtitle">批量创建站点、共享 CNAME、HTTPS、源站防护和 DNS CNAME</div>
+    </div>
+    <div class="header-actions">
+      <span class="pill">新账号批量创建 @ 和 *</span>
+      <form method="post" action="/logout"><button class="secondary logout" type="submit">退出登录</button></form>
+    </div>
   </header>
   <main>
     <section class="form">
       <div class="grid">
-        <div class="full">
+        <div class="full field-card">
           <label for="domains">站点域名</label>
           <textarea id="domains" placeholder="example.com&#10;example2.com"></textarea>
           <div class="hint">每行一个，也支持空格、逗号、分号分隔。每个站点会创建 <b>@</b> 和 <b>*</b> 两个加速域名。</div>
         </div>
-        <div class="full">
+        <div class="full field-card">
           <label for="origin_cname_preset">源站 / 共享 CNAME 预设</label>
           <select id="origin_cname_preset">
             <option value="">自定义</option>
@@ -802,7 +911,7 @@ HTML = r"""<!doctype html>
         <button id="start">开始创建</button>
         <button class="secondary" id="clear" type="button">清空日志</button>
       </div>
-      <div class="hint" style="margin-top:10px">配置模板应包含：节点缓存不缓存、浏览器缓存 TTL 0、HTTPS、WebSocket、中国大陆网络优化。勾选 DNS CNAME 后，站点创建成功才会把 @ 和 * 指向共享 CNAME。</div>
+      <div class="hint compact-note" style="margin-top:10px">配置模板应包含：节点缓存不缓存、浏览器缓存 TTL 0、HTTPS、WebSocket、中国大陆网络优化。勾选 DNS CNAME 后，站点创建成功才会把 @ 和 * 指向共享 CNAME。</div>
     </section>
 
     <section class="split">
@@ -1015,29 +1124,149 @@ HTML = r"""<!doctype html>
 """.replace("__DEFAULT_CONFIG__", html.escape(DEFAULT_CONFIG_JSON)).replace("__DEFAULT_PLAN__", html.escape(DEFAULT_PLAN_ID))
 
 
+LOGIN_HTML = r"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · EdgeOne 站点创建</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #172033;
+      background:
+        linear-gradient(135deg, rgba(20, 99, 255, .14), transparent 36%),
+        linear-gradient(315deg, rgba(11, 132, 90, .12), transparent 34%),
+        #f4f7fb;
+    }
+    .login {
+      width: min(420px, calc(100vw - 32px));
+      background: #fff;
+      border: 1px solid #d7deea;
+      border-radius: 10px;
+      box-shadow: 0 18px 50px rgba(23, 32, 51, .12);
+      padding: 28px;
+    }
+    h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: 0; }
+    p { margin: 0 0 22px; color: #667085; line-height: 1.5; }
+    label { display: block; font-weight: 650; margin: 14px 0 6px; }
+    input {
+      width: 100%;
+      height: 42px;
+      border: 1px solid #cfd6e2;
+      border-radius: 6px;
+      padding: 0 12px;
+      font: inherit;
+      outline: none;
+    }
+    input:focus { border-color: #1463ff; box-shadow: 0 0 0 3px rgba(20, 99, 255, .12); }
+    button {
+      width: 100%;
+      height: 42px;
+      margin-top: 20px;
+      border: 0;
+      border-radius: 6px;
+      background: #1463ff;
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .error {
+      margin-top: 14px;
+      padding: 10px 12px;
+      border-radius: 6px;
+      color: #9f1f17;
+      background: #fff0ee;
+      display: __ERROR_DISPLAY__;
+    }
+  </style>
+</head>
+<body>
+  <form class="login" method="post" action="/login">
+    <h1>EdgeOne 站点创建</h1>
+    <p>登录后可批量创建站点、绑定共享 CNAME、证书、源站防护和 DNS 解析。</p>
+    <label for="username">账号</label>
+    <input id="username" name="username" autocomplete="username" value="__AUTH_USER__" autofocus>
+    <label for="password">密码</label>
+    <input id="password" name="password" type="password" autocomplete="current-password">
+    <button type="submit">登录</button>
+    <div class="error">账号或密码不正确</div>
+  </form>
+</body>
+</html>
+"""
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "EOSiteCreator/1.0"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"{self.address_string()} - {fmt % args}", file=sys.stderr)
 
+    def send_html(self, body: str, status: int = 200) -> None:
+        raw = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(raw)
+
     def send_json(self, data: dict[str, Any], status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
+    def session_token(self) -> str:
+        cookies = parse_cookie(self.headers.get("Cookie", ""))
+        return cookies.get("eo_site_creator_session", "")
+
+    def is_authenticated(self) -> bool:
+        if not auth_enabled():
+            return True
+        return STATE.valid_session(self.session_token())
+
+    def login_page(self, failed: bool = False) -> str:
+        return (
+            LOGIN_HTML.replace("__AUTH_USER__", html.escape(STATE.args.auth_user))
+            .replace("__ERROR_DISPLAY__", "block" if failed else "none")
+        )
+
+    def require_auth(self) -> bool:
+        if self.is_authenticated():
+            return True
+        if self.path.startswith("/api/"):
+            self.send_json({"error": "unauthorized"}, status=401)
+        else:
+            self.send_response(302)
+            self.send_header("Location", "/login")
+            self.end_headers()
+        return False
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/login":
+            if self.is_authenticated():
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+            qs = parse_qs(parsed.query)
+            self.send_html(self.login_page(failed=qs.get("failed") == ["1"]))
+            return
+        if not self.require_auth():
+            return
         if parsed.path == "/":
-            body = HTML.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self.send_html(HTML.replace("__CACHE_BUSTER__", cache_buster()))
             return
         if parsed.path == "/api/templates":
             qs = parse_qs(parsed.query)
@@ -1067,6 +1296,36 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length", "0") or "0")
         raw = self.rfile.read(length)
+        if parsed.path == "/login":
+            form = parse_qs(raw.decode("utf-8"))
+            username = (form.get("username") or [""])[0]
+            password = (form.get("password") or [""])[0]
+            if username == STATE.args.auth_user and verify_password(password):
+                token = STATE.create_session()
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header(
+                    "Set-Cookie",
+                    f"eo_site_creator_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400",
+                )
+                self.end_headers()
+                return
+            self.send_response(302)
+            self.send_header("Location", "/login?failed=1")
+            self.end_headers()
+            return
+        if parsed.path == "/logout":
+            STATE.destroy_session(self.session_token())
+            self.send_response(302)
+            self.send_header("Location", "/login")
+            self.send_header(
+                "Set-Cookie",
+                "eo_site_creator_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+            )
+            self.end_headers()
+            return
+        if not self.require_auth():
+            return
         try:
             data = json.loads(raw.decode("utf-8") or "{}")
         except json.JSONDecodeError:
@@ -1099,6 +1358,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config-json", default=DEFAULT_CONFIG_JSON)
     parser.add_argument("--output-root", default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--presets-json", default=DEFAULT_PRESETS_JSON)
+    parser.add_argument("--auth-user", default=os.environ.get("EO_SITE_CREATOR_USER", "admin"))
+    parser.add_argument("--auth-password", default=os.environ.get("EO_SITE_CREATOR_PASSWORD", ""))
+    parser.add_argument("--session-secret", default=os.environ.get("EO_SITE_CREATOR_SESSION_SECRET", ""))
     return parser
 
 
@@ -1112,6 +1374,7 @@ def main() -> int:
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"EdgeOne site creator listening on http://{args.host}:{args.port}")
     print(f"Using tx-eo dir: {STATE.tx_eo_dir}")
+    print(f"Login auth: {'enabled' if auth_enabled() else 'disabled'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

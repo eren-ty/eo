@@ -14,6 +14,7 @@
 - 默认回源 HOST 头使用加速域名
 - 源站、共享 CNAME、DNS env 支持页面预设选择，也支持手动改值
 - 可选自动把 DNS 里的 `@` 和 `*` CNAME 解析到共享 CNAME
+- 可选账号密码登录，适合放在内网或安全组白名单后使用
 
 ## 运行
 
@@ -27,6 +28,24 @@
 
 - `tencent-eo-new.env`
 - `dns-providers.env`
+
+如果要开启页面登录，复制并修改：
+
+```bash
+cd /opt/eo-site-creator
+cp eo-site-creator.env.example eo-site-creator.env
+vi eo-site-creator.env
+```
+
+示例：
+
+```bash
+EO_SITE_CREATOR_USER=admin
+EO_SITE_CREATOR_PASSWORD=你的登录密码
+EO_SITE_CREATOR_SESSION_SECRET=一串随机长字符串
+```
+
+只要 `EO_SITE_CREATOR_PASSWORD` 不为空，页面就会要求登录；如果留空，则不启用登录。
 
 启动：
 
@@ -77,6 +96,15 @@ deploy/eo-site-creator.service
 ```
 
 如果要改端口，编辑 `deploy/eo-site-creator.service` 里的 `ExecStart`，然后重新执行安装脚本或手动复制到 `/etc/systemd/system/eo-site-creator.service` 后 `systemctl daemon-reload && systemctl restart eo-site-creator`。
+
+如果要启用或修改登录账号密码：
+
+```bash
+cd /opt/eo-site-creator
+cp -n eo-site-creator.env.example eo-site-creator.env
+vi eo-site-creator.env
+systemctl restart eo-site-creator
+```
 
 ## 默认行为
 
