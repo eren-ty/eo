@@ -701,6 +701,7 @@ HTML = r"""<!doctype html>
             <option value="">自定义</option>
           </select>
           <div class="hint">选择后会自动填充下面的源站和共享 CNAME，仍然可以手动修改。</div>
+          <div class="hint" id="active_origin_cname">当前：自定义</div>
         </div>
         <div>
           <label for="origin">源站</label>
@@ -797,21 +798,44 @@ HTML = r"""<!doctype html>
       }
       const preset = $("origin_cname_preset");
       preset.innerHTML = '<option value="">自定义</option>';
-      for (const item of originCnamePresets) {
+      originCnamePresets.forEach((item, index) => {
         const opt = document.createElement("option");
-        opt.value = item.label;
+        opt.value = String(index);
         opt.textContent = item.label + " · " + (item.origin || "自填源站") + " · " + item.cname;
+        opt.title = opt.textContent;
         preset.appendChild(opt);
+      });
+
+      function updateActiveOriginCname() {
+        $("origin").title = $("origin").value;
+        $("shared_cname").title = $("shared_cname").value;
+        $("active_origin_cname").textContent =
+          "当前实际提交：源站 " + ($("origin").value || "-") +
+          " / CNAME " + ($("shared_cname").value || "-");
       }
-      preset.addEventListener("change", () => {
-        const item = originCnamePresets.find(x => x.label === preset.value);
+
+      function applyOriginCnamePreset() {
+        const item = originCnamePresets[Number(preset.value)];
         if (!item) return;
         if (item.origin) $("origin").value = item.origin;
         $("shared_cname").value = item.cname;
+        updateActiveOriginCname();
+      }
+
+      preset.addEventListener("change", applyOriginCnamePreset);
+      $("origin").addEventListener("input", () => {
+        preset.value = "";
+        updateActiveOriginCname();
+      });
+      $("shared_cname").addEventListener("input", () => {
+        preset.value = "";
+        updateActiveOriginCname();
       });
       if (originCnamePresets.length) {
-        preset.value = originCnamePresets[0].label;
-        preset.dispatchEvent(new Event("change"));
+        preset.value = "0";
+        applyOriginCnamePreset();
+      } else {
+        updateActiveOriginCname();
       }
 
       const dnsPreset = $("dns_env_preset");
