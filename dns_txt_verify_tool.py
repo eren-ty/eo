@@ -641,16 +641,21 @@ def list_dnspod_records(
     rr: str,
     record_type: str,
 ) -> list[dict[str, Any]]:
-    resp = client.call(
-        "DescribeRecordList",
-        {
-            "Domain": domain,
-            "Subdomain": rr,
-            "RecordType": record_type,
-            "Limit": 100,
-            "Offset": 0,
-        },
-    )
+    try:
+        resp = client.call(
+            "DescribeRecordList",
+            {
+                "Domain": domain,
+                "Subdomain": rr,
+                "RecordType": record_type,
+                "Limit": 100,
+                "Offset": 0,
+            },
+        )
+    except ApiError as exc:
+        if "ResourceNotFound.NoDataOfRecord" in str(exc):
+            return []
+        raise
     items = resp.get("RecordList") or resp.get("Records") or []
     return items if isinstance(items, list) else []
 
