@@ -45,6 +45,39 @@ http://服务器IP:8088/
 
 建议只在内网或临时安全组白名单里开放这个端口，不要直接公网裸奔。
 
+## systemd 服务
+
+服务器上安装为 systemd 服务：
+
+```bash
+cd /opt/eo-site-creator
+chmod +x scripts/install-systemd.sh
+./scripts/install-systemd.sh
+systemctl start eo-site-creator
+```
+
+常用命令：
+
+```bash
+systemctl status eo-site-creator --no-pager
+systemctl restart eo-site-creator
+journalctl -u eo-site-creator -f
+```
+
+服务文件在：
+
+```text
+deploy/eo-site-creator.service
+```
+
+默认监听：
+
+```text
+0.0.0.0:8088
+```
+
+如果要改端口，编辑 `deploy/eo-site-creator.service` 里的 `ExecStart`，然后重新执行安装脚本或手动复制到 `/etc/systemd/system/eo-site-creator.service` 后 `systemctl daemon-reload && systemctl restart eo-site-creator`。
+
 ## 默认行为
 
 页面提交一个 `example.com` 时，会执行等价流程：
