@@ -684,9 +684,10 @@ HTML = r"""<!doctype html>
   <style>
     :root {
       color-scheme: light;
-      --bg: #eef3fb;
+      --bg: #edf3fb;
       --panel: #ffffff;
       --panel-soft: #f8fbff;
+      --panel-tint: #f3f7ff;
       --line: #d8e1ee;
       --line-strong: #c8d4e5;
       --text: #172033;
@@ -696,15 +697,17 @@ HTML = r"""<!doctype html>
       --red: #c0342b;
       --green: #0a8f4b;
       --amber: #9a6700;
-      --shadow: 0 12px 36px rgba(15, 23, 42, .08);
+      --shadow: 0 18px 46px rgba(15, 23, 42, .10);
+      --shadow-soft: 0 10px 26px rgba(15, 23, 42, .06);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background:
-        radial-gradient(circle at top left, rgba(20, 99, 255, .12), transparent 34rem),
-        linear-gradient(180deg, #f7faff 0, var(--bg) 260px);
+        radial-gradient(circle at 12% 0, rgba(20, 99, 255, .16), transparent 33rem),
+        radial-gradient(circle at 100% 18%, rgba(14, 165, 233, .12), transparent 31rem),
+        linear-gradient(180deg, #f8fbff 0, var(--bg) 280px);
       color: var(--text);
       font-size: 14px;
     }
@@ -721,6 +724,7 @@ HTML = r"""<!doctype html>
       position: sticky;
       top: 0;
       z-index: 5;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, .04);
     }
     .brand { display: flex; flex-direction: column; gap: 3px; }
     h1 {
@@ -737,11 +741,12 @@ HTML = r"""<!doctype html>
       gap: 18px;
       padding: 18px;
       min-height: calc(100vh - 68px);
+      align-items: start;
     }
     section {
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: 16px;
       box-shadow: var(--shadow);
       overflow: hidden;
     }
@@ -751,7 +756,7 @@ HTML = r"""<!doctype html>
     input, textarea, select {
       width: 100%;
       border: 1px solid #cbd5e1;
-      border-radius: 8px;
+      border-radius: 10px;
       padding: 10px 12px;
       font: inherit;
       background: #fff;
@@ -780,7 +785,7 @@ HTML = r"""<!doctype html>
       border: 1px solid var(--blue);
       background: var(--blue);
       color: #fff;
-      border-radius: 8px;
+      border-radius: 10px;
       height: 40px;
       padding: 0 18px;
       font-weight: 750;
@@ -800,23 +805,81 @@ HTML = r"""<!doctype html>
       font-size: 12px;
     }
     .primary-action { min-width: 110px; }
+    .action-row {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
     .toolbar {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 16px 18px;
+      gap: 16px;
+      padding: 18px 22px;
       border-bottom: 1px solid var(--line);
-      background: var(--panel-soft);
+      background:
+        linear-gradient(135deg, rgba(20, 99, 255, .07), transparent 45%),
+        var(--panel-soft);
     }
-    .status { font-weight: 700; }
-    .status.success { color: var(--green); }
-    .status.failed { color: var(--red); }
-    .status.running, .status.queued { color: var(--amber); }
+    .panel-kicker {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      margin-bottom: 6px;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 12px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #273c94;
+      font-weight: 800;
+    }
+    .status.success { color: var(--green); background: #e8f8ef; }
+    .status.failed { color: var(--red); background: #fff1f1; }
+    .status.running, .status.queued { color: var(--amber); background: #fff7df; }
+    .job-id {
+      max-width: 46%;
+      text-align: right;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .results { padding: 0 18px 18px; overflow: auto; }
     table { width: 100%; border-collapse: collapse; }
     th, td { border-bottom: 1px solid var(--line); padding: 11px 8px; text-align: left; vertical-align: top; }
     th { color: var(--muted); font-weight: 650; }
     tbody tr:hover { background: #f8fbff; }
+    .table-status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 9px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #273c94;
+      font-weight: 750;
+      font-size: 12px;
+    }
+    .table-status.success { color: var(--green); background: #e8f8ef; }
+    .table-status.failed { color: var(--red); background: #fff1f1; }
+    .table-status.running, .table-status.queued { color: var(--amber); background: #fff7df; }
+    .empty-row td {
+      color: var(--muted);
+      text-align: center;
+      padding: 48px 8px;
+      border-bottom: 0;
+    }
+    .log-title {
+      padding: 10px 16px;
+      background: #111827;
+      color: #cbd5e1;
+      border-top: 1px solid #1e293b;
+      font-weight: 750;
+      letter-spacing: 0;
+    }
     pre {
       margin: 0;
       height: 390px;
@@ -830,7 +893,7 @@ HTML = r"""<!doctype html>
       white-space: pre-wrap;
       word-break: break-word;
     }
-    .split { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+    .split { display: grid; grid-template-rows: auto minmax(190px, 1fr) auto 390px; min-height: calc(100vh - 104px); }
     .pill {
       display: inline-flex;
       align-items: center;
@@ -844,9 +907,22 @@ HTML = r"""<!doctype html>
     }
     .field-card {
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: 14px;
       padding: 14px;
-      background: var(--panel-soft);
+      background: linear-gradient(180deg, #fbfdff, var(--panel-soft));
+      box-shadow: var(--shadow-soft);
+    }
+    .section-label {
+      color: #334155;
+      font-size: 12px;
+      font-weight: 800;
+      margin: 2px 0 -4px;
+    }
+    .option-bar {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: var(--panel-tint);
     }
     .compact-note {
       border-left: 3px solid var(--blue);
@@ -890,6 +966,7 @@ HTML = r"""<!doctype html>
           <div class="hint">选择后会自动填充下面的源站和共享 CNAME，仍然可以手动修改。</div>
           <div class="hint" id="active_origin_cname">当前：自定义</div>
         </div>
+        <div class="full section-label">基础配置</div>
         <div>
           <label for="origin">源站</label>
           <input id="origin" placeholder="source-178.gtmvip.com">
@@ -930,7 +1007,7 @@ HTML = r"""<!doctype html>
           <select id="web_template"><option value="">不关联</option></select>
           <div class="hint">从新账号实时拉取。模板绑定失败不会中断站点创建，会写日志。</div>
         </div>
-        <div class="full row">
+        <div class="full row option-bar">
           <label class="check"><input id="auto_cert" type="checkbox" checked> 自动匹配 HTTPS 证书</label>
           <label class="check"><input id="enable_origin_acl" type="checkbox" checked> 开启源站防护</label>
           <label class="check"><input id="configure_dns_cname" type="checkbox"> 自动写 DNS CNAME（@ 和 *）</label>
@@ -953,8 +1030,8 @@ HTML = r"""<!doctype html>
           <div><label for="dns_cname_ttl">DNS CNAME TTL</label><input id="dns_cname_ttl" type="number" value="600"></div>
         </div>
       </details>
-      <div class="row" style="margin-top:16px">
-        <button id="start">开始创建</button>
+      <div class="row action-row">
+        <button id="start" class="primary-action">开始创建</button>
         <button class="secondary" id="clear" type="button">清空日志</button>
       </div>
       <div class="hint compact-note" style="margin-top:10px">配置模板应包含：节点缓存不缓存、浏览器缓存 TTL 0、HTTPS、WebSocket、中国大陆网络优化。勾选 DNS CNAME 后，站点创建成功才会把 @ 和 * 指向共享 CNAME。</div>
@@ -962,15 +1039,19 @@ HTML = r"""<!doctype html>
 
     <section class="split">
       <div class="toolbar">
-        <div>任务状态：<span id="job_status" class="status">未开始</span></div>
-        <div id="job_id" class="hint"></div>
+        <div>
+          <div class="panel-kicker">任务状态</div>
+          <span id="job_status" class="status idle">未开始</span>
+        </div>
+        <div id="job_id" class="hint job-id"></div>
       </div>
       <div class="results">
         <table>
           <thead><tr><th>域名</th><th>状态</th><th>ZoneId</th><th>DNS CNAME</th><th>输出目录</th></tr></thead>
-          <tbody id="results"></tbody>
+          <tbody id="results"><tr class="empty-row"><td colspan="5">等待提交任务</td></tr></tbody>
         </table>
       </div>
+      <div class="log-title">实时日志</div>
       <pre id="logs"></pre>
     </section>
   </main>
@@ -1144,11 +1225,11 @@ HTML = r"""<!doctype html>
       $("results").innerHTML = data.results.map(r => `
         <tr>
           <td>${escapeHtml(r.domain || "")}</td>
-          <td>${escapeHtml(r.status || "")}</td>
+          <td>${statusBadge(r.status || "")}</td>
           <td>${escapeHtml(r.zone_id || "")}</td>
           <td>${escapeHtml(r.dns_cname_status || "")}</td>
           <td>${escapeHtml(r.output_dir || "")}</td>
-        </tr>`).join("");
+        </tr>`).join("") || '<tr class="empty-row"><td colspan="5">任务已提交，等待第一条结果</td></tr>';
       if (["success", "failed"].includes(data.status) && pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
@@ -1158,9 +1239,17 @@ HTML = r"""<!doctype html>
     function escapeHtml(s) {
       return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
+    function statusBadge(s) {
+      const safe = escapeHtml(s);
+      const klass = ["success", "failed", "running", "queued"].includes(s) ? s : "";
+      return `<span class="table-status ${klass}">${safe}</span>`;
+    }
 
     $("start").addEventListener("click", startJob);
-    $("clear").addEventListener("click", () => { $("logs").textContent = ""; $("results").innerHTML = ""; });
+    $("clear").addEventListener("click", () => {
+      $("logs").textContent = "";
+      $("results").innerHTML = '<tr class="empty-row"><td colspan="5">等待提交任务</td></tr>';
+    });
     $("refresh_templates").addEventListener("click", () => loadTemplates(true));
     initPresets();
     loadTemplates(false);
