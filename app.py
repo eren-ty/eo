@@ -40,6 +40,7 @@ DEFAULT_OUTPUT_ROOT = "onboard-results-web"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8088
 DEFAULT_PRESETS_JSON = "presets.json"
+DEFAULT_APP_ENV = "eo-site-creator.env"
 
 DOMAIN_RE = re.compile(r"^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", re.I)
 
@@ -65,6 +66,24 @@ def split_domains(value: str) -> list[str]:
         domains.append(domain)
         seen.add(domain)
     return domains
+
+
+def load_app_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            item = line.strip()
+            if not item or item.startswith("#") or "=" not in item:
+                continue
+            key, value = item.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key or key in os.environ:
+                continue
+            if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                value = value[1:-1]
+            os.environ[key] = value
 
 
 def load_tool_module(tx_eo_dir: Path):
@@ -276,6 +295,20 @@ def read_zone_id_from_ownership(path: Path) -> str:
     return ""
 
 
+def retryable_web_template_error(exc: Exception) -> bool:
+    message = str(exc)
+    patterns = (
+        "存在变更状态",
+        "未开启安全功能",
+        "being deployed",
+        "deploying",
+        "initializing",
+        "not ready",
+        "ConfigInitializing",
+    )
+    return any(pattern in message for pattern in patterns)
+
+
 def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], template_ref: str) -> None:
     if not template_ref:
         return
@@ -315,18 +348,31 @@ def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], templat
 
     last_error: Exception | None = None
     attempted: list[str] = []
-    for action in actions:
-        for payload in payloads:
-            attempted.append(f"{action}/ZoneId={payload['ZoneId']}")
-            try:
-                response = client.call(action, payload)
-                job.log(
-                    f"Web protection template bound to {', '.join(hosts)} "
-                    f"using {action}: {json.dumps(response, ensure_ascii=False)}"
-                )
-                return
-            except Exception as exc:
-                last_error = exc
+    max_attempts = 18
+    wait_seconds = 10
+    for bind_attempt in range(1, max_attempts + 1):
+        attempted = []
+        for action in actions:
+            for payload in payloads:
+                attempted.append(f"{action}/ZoneId={payload['ZoneId']}")
+                try:
+                    response = client.call(action, payload)
+                    job.log(
+                        f"Web protection template bound to {', '.join(hosts)} "
+                        f"using {action}: {json.dumps(response, ensure_ascii=False)}"
+                    )
+                    return
+                except Exception as exc:
+                    last_error = exc
+        if last_error and retryable_web_template_error(last_error) and bind_attempt < max_attempts:
+            job.log(
+                "Web protection template not ready for "
+                + f"{', '.join(hosts)}; retrying in {wait_seconds}s "
+                + f"({bind_attempt}/{max_attempts}): {last_error}"
+            )
+            time.sleep(wait_seconds)
+            continue
+        break
     job.log(
         "Web protection template bind failed for "
         + f"{', '.join(hosts)}: {last_error}; "
@@ -1366,6 +1412,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     global STATE
+    load_app_env_file(Path(__file__).resolve().parent / DEFAULT_APP_ENV)
     args = build_parser().parse_args()
     STATE = AppState(args)
     load_tool_module(STATE.tx_eo_dir)

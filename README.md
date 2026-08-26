@@ -46,6 +46,7 @@ EO_SITE_CREATOR_SESSION_SECRET=一串随机长字符串
 ```
 
 只要 `EO_SITE_CREATOR_PASSWORD` 不为空，页面就会要求登录；如果留空，则不启用登录。
+程序启动时会自动读取仓库目录下的 `eo-site-creator.env`。systemd 也会读取同一个文件，所以手动启动和服务启动都能生效。
 
 启动：
 
@@ -126,6 +127,8 @@ systemctl restart eo-site-creator
 ```
 
 这一步会使用页面选择的 `DNS env`。如果同 RR 已经有 CNAME，会更新到新的共享 CNAME；如果存在其他类型冲突，会在任务日志和结果 CSV 里报错。
+
+Web 防护模板绑定会在站点创建、加速域名、证书和源站防护完成后执行。如果 EdgeOne 返回“域名存在变更状态或未开启安全功能”，程序会自动等待并重试，最多约 3 分钟。
 
 默认配置模板：
 
