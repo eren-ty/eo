@@ -2012,6 +2012,18 @@ def acceleration_domain_origin_ports(args: argparse.Namespace) -> dict[str, Any]
     }
 
 
+def is_create_acceleration_domain_retryable(error: str) -> bool:
+    return any(
+        token in error
+        for token in (
+            "OperationDenied.SharedCnameConfigInitializing",
+            "OperationDenied.SharedCnameCN2NotMatch",
+            "OperationDenied.ResourceLockedTemporary",
+            "RequestLimitExceeded",
+        )
+    )
+
+
 def csv_acceleration_domain_origin_ports(record: dict[str, str], args: argparse.Namespace) -> dict[str, Any]:
     return {
         "OriginProtocol": (record.get("origin_protocol") or "").strip() or args.origin_protocol,
@@ -2161,14 +2173,30 @@ def cmd_create_acceleration_domains(args: argparse.Namespace) -> int:
     results = []
     failures = 0
     for payload in payloads:
-        try:
-            response = client.call("CreateAccelerationDomain", payload)
-            results.append({"domain": payload["DomainName"], "payload": payload, "response": response})
-            print(f"Created acceleration domain: {payload['DomainName']}")
-        except Exception as exc:
+        created = False
+        last_error = ""
+        for attempt in range(args.create_domain_retries + 1):
+            try:
+                response = client.call("CreateAccelerationDomain", payload)
+                results.append({"domain": payload["DomainName"], "payload": payload, "response": response})
+                print(f"Created acceleration domain: {payload['DomainName']}")
+                created = True
+                break
+            except Exception as exc:
+                last_error = str(exc)
+                if not is_create_acceleration_domain_retryable(last_error) or attempt >= args.create_domain_retries:
+                    break
+                wait_seconds = args.create_domain_retry_wait_seconds
+                print(
+                    f"CreateAccelerationDomain not ready for {payload['DomainName']}; "
+                    f"retrying in {wait_seconds}s ({attempt + 1}/{args.create_domain_retries})",
+                    file=sys.stderr,
+                )
+                time.sleep(wait_seconds)
+        if not created:
             failures += 1
-            results.append({"domain": payload["DomainName"], "payload": payload, "error": str(exc)})
-            print(f"FAILED CreateAccelerationDomain {payload['DomainName']}: {exc}", file=sys.stderr)
+            results.append({"domain": payload["DomainName"], "payload": payload, "error": last_error})
+            print(f"FAILED CreateAccelerationDomain {payload['DomainName']}: {last_error}", file=sys.stderr)
     with open(args.response_json, "w", encoding="utf-8") as f:
         json.dump({"results": results}, f, ensure_ascii=False, indent=2, sort_keys=True)
     print(f"Wrote create acceleration domains response: {args.response_json}")
@@ -3011,14 +3039,8 @@ def cmd_onboard_zone(args: argparse.Namespace) -> int:
                     break
                 except Exception as exc:
                     last_error = str(exc)
-                    retryable = any(
-                        token in last_error
-                        for token in (
-                            "OperationDenied.SharedCnameConfigInitializing",
-                            "ResourceUnavailable.DomainAlreadyExists",
-                            "OperationDenied.ResourceLockedTemporary",
-                            "RequestLimitExceeded",
-                        )
+                    retryable = is_create_acceleration_domain_retryable(last_error) or (
+                        "ResourceUnavailable.DomainAlreadyExists" in last_error
                     )
                     if not retryable or attempt >= args.create_domain_retries:
                         break
@@ -3458,6 +3480,8 @@ def build_parser() -> argparse.ArgumentParser:
     create_acc_domain.add_argument("--origin-type", default="IP_DOMAIN")
     add_origin_protocol_args(create_acc_domain)
     create_acc_domain.add_argument("--host-header", help="Optional custom origin HostHeader. Omit to use acceleration domain.")
+    create_acc_domain.add_argument("--create-domain-retries", type=int, default=30)
+    create_acc_domain.add_argument("--create-domain-retry-wait-seconds", type=int, default=20)
     create_acc_domain.add_argument("--response-json", default="create-acceleration-domains-response.json")
     create_acc_domain.add_argument("--apply", action="store_true", help="Actually call CreateAccelerationDomain.")
     create_acc_domain.add_argument("--yes", action="store_true", help="Required with --apply.")
