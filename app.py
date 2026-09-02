@@ -1087,7 +1087,8 @@ HTML = r"""<!doctype html>
         $("shared_cname").title = $("shared_cname").value;
         $("active_origin_cname").textContent =
           "当前实际提交：源站 " + ($("origin").value || "-") +
-          " / CNAME " + ($("shared_cname").value || "-");
+          " / CNAME " + ($("shared_cname").value || "-") +
+          " / 大陆优化 " + $("accelerate_mainland").value;
       }
 
       function applyOriginCnamePreset() {
@@ -1095,6 +1096,9 @@ HTML = r"""<!doctype html>
         if (!item) return;
         if (item.origin) $("origin").value = item.origin;
         $("shared_cname").value = item.cname;
+        if (["template", "on", "off"].includes(item.accelerate_mainland)) {
+          $("accelerate_mainland").value = item.accelerate_mainland;
+        }
         updateActiveOriginCname();
       }
 
@@ -1107,6 +1111,7 @@ HTML = r"""<!doctype html>
         preset.value = "";
         updateActiveOriginCname();
       });
+      $("accelerate_mainland").addEventListener("change", updateActiveOriginCname);
       if (originCnamePresets.length) {
         preset.value = "0";
         applyOriginCnamePreset();
