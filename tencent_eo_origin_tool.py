@@ -1625,6 +1625,9 @@ def cmd_fix_acceleration_domain_host_headers(args: argparse.Namespace) -> int:
     client = require_credentials(args)
     data = export_all(client, args)
     only_domains = set(split_domain_names(args.domain_names)) if args.domain_names else set()
+    if args.domain_file:
+        with open(args.domain_file, "r", encoding="utf-8-sig") as f:
+            only_domains.update(line.strip() for line in f if line.strip() and not line.lstrip().startswith("#"))
     from_host_headers = set(split_domain_names(args.from_host_header)) if args.from_host_header else set()
     target_ports = acceleration_domain_origin_ports(args)
 
@@ -3562,6 +3565,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--domain-names",
         default="",
         help="Optional comma/semicolon-separated acceleration domains to fix. Default: scan all.",
+    )
+    fix_host.add_argument(
+        "--domain-file",
+        default="",
+        help="Optional file containing one acceleration domain per line to fix.",
     )
     fix_host.add_argument(
         "--from-host-header",
