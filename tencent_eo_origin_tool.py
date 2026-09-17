@@ -1421,6 +1421,17 @@ def get_domain_origin_info(domain: dict[str, Any]) -> dict[str, Any]:
     return info if isinstance(info, dict) else {}
 
 
+def mutable_domain_origin_info(info: dict[str, Any]) -> dict[str, Any]:
+    cleaned = copy.deepcopy(info)
+    for key in (
+        # DescribeAccelerationDomains returns this display-only field, but
+        # ModifyAccelerationDomain rejects it inside OriginInfo.
+        "OriginGroupName",
+    ):
+        cleaned.pop(key, None)
+    return cleaned
+
+
 def read_mapping(path: str) -> dict[str, str]:
     mapping: dict[str, str] = {}
     with open(path, "r", encoding="utf-8-sig", newline="") as f:
@@ -1481,7 +1492,7 @@ def build_changes(data: dict[str, Any], mapping: dict[str, str], scopes: set[str
 
         if "acceleration_domain" in scopes:
             for domain in zone_entry.get("acceleration_domains", []):
-                info = copy.deepcopy(get_domain_origin_info(domain))
+                info = mutable_domain_origin_info(get_domain_origin_info(domain))
                 replacements = []
                 for key in ("Origin", "BackupOrigin"):
                     new_value, changed = replace_value(info.get(key), mapping)
@@ -1623,7 +1634,7 @@ def cmd_fix_acceleration_domain_host_headers(args: argparse.Namespace) -> int:
             if only_domains and domain_name not in only_domains:
                 continue
 
-            info = copy.deepcopy(get_domain_origin_info(domain))
+            info = mutable_domain_origin_info(get_domain_origin_info(domain))
             old_host_header = str(info.get("HostHeader") or domain.get("HostHeader") or "")
             if from_host_headers and old_host_header not in from_host_headers:
                 continue
