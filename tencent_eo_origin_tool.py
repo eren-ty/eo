@@ -1629,7 +1629,8 @@ def cmd_fix_acceleration_domain_host_headers(args: argparse.Namespace) -> int:
         with open(args.domain_file, "r", encoding="utf-8-sig") as f:
             only_domains.update(line.strip() for line in f if line.strip() and not line.lstrip().startswith("#"))
     from_host_headers = set(split_domain_names(args.from_host_header)) if args.from_host_header else set()
-    target_ports = acceleration_domain_origin_ports(args)
+    update_origin_settings = bool(getattr(args, "set_origin_settings", False))
+    target_ports = acceleration_domain_origin_ports(args) if update_origin_settings else {}
 
     changes: list[dict[str, Any]] = []
     for zone_entry in data.get("zones", []):
@@ -1652,26 +1653,24 @@ def cmd_fix_acceleration_domain_host_headers(args: argparse.Namespace) -> int:
             current_http_port = domain.get("HttpOriginPort") or info.get("HttpOriginPort")
             current_https_port = domain.get("HttpsOriginPort") or info.get("HttpsOriginPort")
             needs_change = bool(old_host_header)
-            needs_change = needs_change or current_protocol != args.origin_protocol
-            needs_change = needs_change or str(current_http_port or "") != str(args.http_origin_port)
-            needs_change = needs_change or str(current_https_port or "") != str(args.https_origin_port)
+            if update_origin_settings:
+                needs_change = needs_change or current_protocol != args.origin_protocol
+                needs_change = needs_change or str(current_http_port or "") != str(args.http_origin_port)
+                needs_change = needs_change or str(current_https_port or "") != str(args.https_origin_port)
             if not needs_change:
                 continue
 
             info.pop("HostHeader", None)
-            changes.append(
+            replacements = [
                 {
-                    "scope": "acceleration_domain",
-                    "zone_id": zone_id,
-                    "zone_name": zone_name,
-                    "resource_id": domain_name,
-                    "resource_name": domain_name,
-                    "replacements": [
-                        {
-                            "path": "OriginInfo.HostHeader",
-                            "old": old_host_header,
-                            "new": "use acceleration domain",
-                        },
+                    "path": "OriginInfo.HostHeader",
+                    "old": old_host_header,
+                    "new": "use acceleration domain",
+                }
+            ]
+            if update_origin_settings:
+                replacements.extend(
+                    [
                         {
                             "path": "OriginProtocol",
                             "old": current_protocol,
@@ -1687,7 +1686,16 @@ def cmd_fix_acceleration_domain_host_headers(args: argparse.Namespace) -> int:
                             "old": current_https_port,
                             "new": args.https_origin_port,
                         },
-                    ],
+                    ]
+                )
+            changes.append(
+                {
+                    "scope": "acceleration_domain",
+                    "zone_id": zone_id,
+                    "zone_name": zone_name,
+                    "resource_id": domain_name,
+                    "resource_name": domain_name,
+                    "replacements": replacements,
                     "action": "ModifyAccelerationDomain",
                     "payload": {
                         "ZoneId": zone_id,
@@ -3575,6 +3583,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--from-host-header",
         default="",
         help="Optional comma/semicolon-separated current HostHeader values to fix, such as old root domains.",
+    )
+    fix_host.add_argument(
+        "--set-origin-settings",
+        action="store_true",
+        help="Also set OriginProtocol/HttpOriginPort/HttpsOriginPort. By default only HostHeader is cleared.",
     )
     fix_host.add_argument("--scope", default="acceleration_domain", help=argparse.SUPPRESS)
     fix_host.add_argument("--workers", type=int, default=10, help="Concurrent zone exports before repair. Default: 10")
