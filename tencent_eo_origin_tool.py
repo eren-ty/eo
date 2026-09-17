@@ -1421,7 +1421,7 @@ def get_domain_origin_info(domain: dict[str, Any]) -> dict[str, Any]:
     return info if isinstance(info, dict) else {}
 
 
-def mutable_domain_origin_info(info: dict[str, Any]) -> dict[str, Any]:
+def mutable_domain_origin_info(info: dict[str, Any], *, drop_host_header: bool = False) -> dict[str, Any]:
     cleaned = copy.deepcopy(info)
     for key in (
         # DescribeAccelerationDomains returns this display-only field, but
@@ -1429,6 +1429,12 @@ def mutable_domain_origin_info(info: dict[str, Any]) -> dict[str, Any]:
         "OriginGroupName",
     ):
         cleaned.pop(key, None)
+    if drop_host_header:
+        # Some historical wildcard domains were exported with a literal
+        # wildcard HostHeader. ModifyAccelerationDomain rejects that format;
+        # omitting HostHeader keeps the console setting as "use acceleration
+        # domain", which is the intended default for these migrated domains.
+        cleaned.pop("HostHeader", None)
     return cleaned
 
 
@@ -1492,7 +1498,7 @@ def build_changes(data: dict[str, Any], mapping: dict[str, str], scopes: set[str
 
         if "acceleration_domain" in scopes:
             for domain in zone_entry.get("acceleration_domains", []):
-                info = mutable_domain_origin_info(get_domain_origin_info(domain))
+                info = mutable_domain_origin_info(get_domain_origin_info(domain), drop_host_header=True)
                 replacements = []
                 for key in ("Origin", "BackupOrigin"):
                     new_value, changed = replace_value(info.get(key), mapping)
