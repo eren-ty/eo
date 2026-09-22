@@ -525,12 +525,26 @@ def build_provider_domains(
 
     provider_domains: dict[str, set[str]] = {}
     if dnspod:
-        provider_domains["dnspod"] = list_dnspod_domains(dnspod)
+        domains = safe_list_provider_domains("dnspod", lambda: list_dnspod_domains(dnspod))
+        if domains is not None:
+            provider_domains["dnspod"] = domains
     for key, client in dnspod_legacy_clients.items():
-        provider_domains[key] = list_dnspod_legacy_domains(client)
+        domains = safe_list_provider_domains(key, lambda client=client: list_dnspod_legacy_domains(client))
+        if domains is not None:
+            provider_domains[key] = domains
     for key, client in alidns_clients.items():
-        provider_domains[key] = list_alidns_domains(client)
+        domains = safe_list_provider_domains(key, lambda client=client: list_alidns_domains(client))
+        if domains is not None:
+            provider_domains[key] = domains
     return provider_domains, dnspod_legacy_clients, dnspod, alidns_clients
+
+
+def safe_list_provider_domains(provider: str, fn: Any) -> set[str] | None:
+    try:
+        return fn()
+    except Exception as exc:
+        print(f"WARNING: skip DNS provider {provider}: {exc}", file=sys.stderr)
+        return None
 
 
 def read_domain_cache(path: str) -> dict[str, set[str]]:
@@ -885,11 +899,17 @@ def load_dns_context(args: argparse.Namespace) -> tuple[
     else:
         provider_domains = {}
         if dnspod:
-            provider_domains["dnspod"] = list_dnspod_domains(dnspod)
+            domains = safe_list_provider_domains("dnspod", lambda: list_dnspod_domains(dnspod))
+            if domains is not None:
+                provider_domains["dnspod"] = domains
         for key, client in dnspod_legacy_clients.items():
-            provider_domains[key] = list_dnspod_legacy_domains(client)
+            domains = safe_list_provider_domains(key, lambda client=client: list_dnspod_legacy_domains(client))
+            if domains is not None:
+                provider_domains[key] = domains
         for key, client in alidns_clients.items():
-            provider_domains[key] = list_alidns_domains(client)
+            domains = safe_list_provider_domains(key, lambda client=client: list_alidns_domains(client))
+            if domains is not None:
+                provider_domains[key] = domains
         if args.domain_cache_json:
             write_domain_cache(args.domain_cache_json, provider_domains)
     if not provider_domains:
