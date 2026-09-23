@@ -348,7 +348,7 @@ def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], templat
 
     last_error: Exception | None = None
     attempted: list[str] = []
-    max_attempts = 18
+    max_attempts = 36
     wait_seconds = 10
     for bind_attempt in range(1, max_attempts + 1):
         attempted = []
@@ -549,6 +549,7 @@ def run_job(job: Job) -> None:
     job.log(f"Output: {output_root}")
 
     failures = 0
+    web_template_queue: list[tuple[str, str, list[str], str]] = []
     for index, domain in enumerate(domains, 1):
         zone_output_dir = output_root / f"{index:03d}-{safe_name(domain)}"
         zone_output_dir.mkdir(parents=True, exist_ok=True)
@@ -575,7 +576,8 @@ def run_job(job: Job) -> None:
         status = "success" if exit_code == 0 else "failed"
         if exit_code == 0 and payload.get("web_template_ref") and zone_id:
             hosts = [f"*.{domain}", domain]
-            bind_web_security_template(job, zone_id, hosts, payload["web_template_ref"])
+            web_template_queue.append((domain, zone_id, hosts, payload["web_template_ref"]))
+            job.log(f"Web protection queued for {domain}; will bind after all domains are created")
         elif exit_code == 0 and payload.get("web_template_ref"):
             job.log(f"Web protection skipped for {domain}: zone id not found in ownership CSV")
 
@@ -600,6 +602,18 @@ def run_job(job: Job) -> None:
                 "finished_at": finished,
             }
         )
+
+    if web_template_queue:
+        wait_before_bind = 90
+        job.log(
+            "Waiting "
+            + f"{wait_before_bind}s before deferred Web protection binding "
+            + f"for {len(web_template_queue)} domain(s)"
+        )
+        time.sleep(wait_before_bind)
+        for domain, zone_id, hosts, template_ref in web_template_queue:
+            job.log(f"Deferred Web protection bind start for {domain}")
+            bind_web_security_template(job, zone_id, hosts, template_ref)
 
     job.finished_at = now_iso()
     job.set_status("failed" if failures else "success")
