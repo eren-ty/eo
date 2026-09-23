@@ -309,14 +309,14 @@ def retryable_web_template_error(exc: Exception) -> bool:
     return any(pattern in message for pattern in patterns)
 
 
-def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], template_ref: str) -> None:
+def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], template_ref: str) -> str:
     if not template_ref:
-        return
+        return "skipped"
     try:
         template_zone_id, template_id = template_ref.split("|", 1)
     except ValueError:
         job.log(f"Web protection skipped: invalid template reference {template_ref}")
-        return
+        return "failed"
 
     teo = load_tool_module(STATE.tx_eo_dir)
 
@@ -361,7 +361,7 @@ def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], templat
                         f"Web protection template bound to {', '.join(hosts)} "
                         f"using {action}: {json.dumps(response, ensure_ascii=False)}"
                     )
-                    return
+                    return "success"
                 except Exception as exc:
                     last_error = exc
         if last_error and retryable_web_template_error(last_error) and bind_attempt < max_attempts:
@@ -379,6 +379,7 @@ def bind_web_security_template(job: Job, zone_id: str, hosts: list[str], templat
         + f"template_zone_id={template_zone_id}, target_zone_id={zone_id}, "
         + f"template_id={template_id}, attempted={';'.join(attempted)}"
     )
+    return "failed"
 
 
 def resolve_tx_eo_path(path_value: str) -> Path:
@@ -539,6 +540,54 @@ def run_dns_cname(job: Job, domain: str, payload: dict[str, Any], output_root: P
     return True
 
 
+def read_origin_acl_status(domain: str, zone_output_dir: Path, enabled: bool) -> str:
+    if not enabled:
+        return "skipped"
+    path = zone_output_dir / f"origin-acl-issues-{safe_name(domain)}.csv"
+    if not path.exists():
+        return "unknown"
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            rows = list(csv.DictReader(f))
+    except Exception:
+        return "unknown"
+    if not rows:
+        return "success"
+    return "failed" if any((row.get("error") or row.get("status")) for row in rows) else "success"
+
+
+def write_job_summary(job: Job, output_root: Path) -> None:
+    rows = job.snapshot()["results"]
+    path = output_root / "summary.csv"
+    fields = [
+        "domain",
+        "status",
+        "zone_id",
+        "dns_cname_status",
+        "origin_acl_status",
+        "web_protection_status",
+        "output_dir",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fields})
+
+    job.log("Summary:")
+    for row in rows:
+        job.log(
+            "  "
+            + f"{row.get('domain', '')}: "
+            + f"site={row.get('status', '')}, "
+            + f"dns={row.get('dns_cname_status', '')}, "
+            + f"origin_acl={row.get('origin_acl_status', '')}, "
+            + f"web_protection={row.get('web_protection_status', '')}, "
+            + f"zone_id={row.get('zone_id', '')}"
+        )
+    job.log(f"Wrote summary CSV: {path}")
+
+
 def run_job(job: Job) -> None:
     payload = job.payload
     job.started_at = now_iso()
@@ -549,6 +598,7 @@ def run_job(job: Job) -> None:
     job.log(f"Output: {output_root}")
 
     failures = 0
+    result_by_domain: dict[str, dict[str, Any]] = {}
     web_template_queue: list[tuple[str, str, list[str], str]] = []
     for index, domain in enumerate(domains, 1):
         zone_output_dir = output_root / f"{index:03d}-{safe_name(domain)}"
@@ -574,11 +624,14 @@ def run_job(job: Job) -> None:
         zone_id = read_zone_id_from_ownership(zone_output_dir / f"ownership-{domain}.csv")
 
         status = "success" if exit_code == 0 else "failed"
+        web_protection_status = "skipped"
         if exit_code == 0 and payload.get("web_template_ref") and zone_id:
             hosts = [f"*.{domain}", domain]
             web_template_queue.append((domain, zone_id, hosts, payload["web_template_ref"]))
+            web_protection_status = "pending"
             job.log(f"Web protection queued for {domain}; will bind after all domains are created")
         elif exit_code == 0 and payload.get("web_template_ref"):
+            web_protection_status = "failed"
             job.log(f"Web protection skipped for {domain}: zone id not found in ownership CSV")
 
         dns_cname_status = "skipped"
@@ -590,18 +643,25 @@ def run_job(job: Job) -> None:
 
         if exit_code != 0:
             failures += 1
-        job.add_result(
-            {
-                "domain": domain,
-                "status": status,
-                "exit_code": exit_code,
-                "zone_id": zone_id,
-                "dns_cname_status": dns_cname_status,
-                "output_dir": str(zone_output_dir),
-                "started_at": started,
-                "finished_at": finished,
-            }
+        origin_acl_status = (
+            read_origin_acl_status(domain, zone_output_dir, bool(payload.get("enable_origin_acl", True)))
+            if exit_code == 0
+            else "skipped"
         )
+        result = {
+            "domain": domain,
+            "status": status,
+            "exit_code": exit_code,
+            "zone_id": zone_id,
+            "dns_cname_status": dns_cname_status,
+            "origin_acl_status": origin_acl_status,
+            "web_protection_status": web_protection_status,
+            "output_dir": str(zone_output_dir),
+            "started_at": started,
+            "finished_at": finished,
+        }
+        job.add_result(result)
+        result_by_domain[domain] = result
 
     if web_template_queue:
         wait_before_bind = 90
@@ -613,9 +673,12 @@ def run_job(job: Job) -> None:
         time.sleep(wait_before_bind)
         for domain, zone_id, hosts, template_ref in web_template_queue:
             job.log(f"Deferred Web protection bind start for {domain}")
-            bind_web_security_template(job, zone_id, hosts, template_ref)
+            web_status = bind_web_security_template(job, zone_id, hosts, template_ref)
+            if domain in result_by_domain:
+                result_by_domain[domain]["web_protection_status"] = web_status
 
     job.finished_at = now_iso()
+    write_job_summary(job, output_root)
     job.set_status("failed" if failures else "success")
     job.log(f"Completed: {len(domains) - failures} success, {failures} failed")
 
@@ -1061,8 +1124,8 @@ HTML = r"""<!doctype html>
       </div>
       <div class="results">
         <table>
-          <thead><tr><th>域名</th><th>状态</th><th>ZoneId</th><th>DNS CNAME</th><th>输出目录</th></tr></thead>
-          <tbody id="results"><tr class="empty-row"><td colspan="5">等待提交任务</td></tr></tbody>
+          <thead><tr><th>域名</th><th>状态</th><th>ZoneId</th><th>DNS CNAME</th><th>源站防护</th><th>Web 防护</th><th>输出目录</th></tr></thead>
+          <tbody id="results"><tr class="empty-row"><td colspan="7">等待提交任务</td></tr></tbody>
         </table>
       </div>
       <div class="log-title">实时日志</div>
@@ -1247,8 +1310,10 @@ HTML = r"""<!doctype html>
           <td>${statusBadge(r.status || "")}</td>
           <td>${escapeHtml(r.zone_id || "")}</td>
           <td>${escapeHtml(r.dns_cname_status || "")}</td>
+          <td>${escapeHtml(r.origin_acl_status || "")}</td>
+          <td>${escapeHtml(r.web_protection_status || "")}</td>
           <td>${escapeHtml(r.output_dir || "")}</td>
-        </tr>`).join("") || '<tr class="empty-row"><td colspan="5">任务已提交，等待第一条结果</td></tr>';
+        </tr>`).join("") || '<tr class="empty-row"><td colspan="7">任务已提交，等待第一条结果</td></tr>';
       if (["success", "failed"].includes(data.status) && pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
@@ -1267,7 +1332,7 @@ HTML = r"""<!doctype html>
     $("start").addEventListener("click", startJob);
     $("clear").addEventListener("click", () => {
       $("logs").textContent = "";
-      $("results").innerHTML = '<tr class="empty-row"><td colspan="5">等待提交任务</td></tr>';
+      $("results").innerHTML = '<tr class="empty-row"><td colspan="7">等待提交任务</td></tr>';
     });
     $("refresh_templates").addEventListener("click", () => loadTemplates(true));
     initPresets();
